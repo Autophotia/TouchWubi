@@ -345,7 +345,7 @@ ly_wubi_pinyin（26键混输）
 
 | 平台 | 主题支持 | 配置文件 |
 |------|----------|----------|
-| PC（小狼毫/鼠须管） | 否（使用系统主题） | `weasel.yaml` / `weasel.custom.yaml` |
+| PC（小狼毫/鼠须管） | 否（使用系统主题） | `weasel.yaml` |
 | 移动端（同文/仓/超越输入法） | 是 | `themes/` 目录下的主题文件 |
 
 ---
@@ -365,7 +365,7 @@ ly_wubi_pinyin（26键混输）
 - 拼音首字母缩写输入（通过 `abbrev` 规则实现）
 - 混输专用开关：`new_phrase_pinyin`（隐声/显声）切换词组拼音/字根拆分显示
 
-**实现文件**：`ly_wubi_ly_pinyin.schema.yaml`、`ly_wubi_ly_pinyin_14.schema.yaml`
+**实现文件**：`ly_wubi_pinyin.schema.yaml`、`ly_wubi_pinyin_14.schema.yaml`
 
 **关键配置**（混输方案特有）：
 ```yaml
@@ -512,7 +512,7 @@ algebra/+:
 > ① 上屏后候选栏**不消失**、② 编码栏常驻 `›`、③ 随手按空格/数字把联想词误上屏。
 > PC 是全键盘精确输入，本来就不需要"点候选续打"。想在 PC 上试：菜单把 `assoc_pc` 切到「双端」。
 
-**实现文件**：`lua/smart_assoc.lua`（主逻辑）+ `lua/assoc_fixed.txt`（固定联想词库，4430 个首字 / 42809 条后续，253 KB，由 `ly_wubi.dict.yaml` 离线生成；重新生成见附录）
+**实现文件**：`lua/smart_assoc.lua`（主逻辑）+ `lua/assoc_fixed.txt`（固定联想词库，12510 个首字 / 12510 条后续，278 KB，由 `ly_wubi.dict.yaml` 离线生成；重新生成见附录）
 
 **怎么用**（无需任何设置，默认开启）：
 
@@ -569,7 +569,7 @@ algebra/+:
 | `assoc_pc` | 仅移动 / 双端 | 仅移动 | PC（小狼毫）是否也联想。移动端不受此项影响 |
 | `assoc_space` | 收起 / 空格 | 收起 | 联想状态下的空格（v5）：收起=按下清空+吞掉（下次长按起语音）；空格=清空后放行，打一个空格符 |
 
-**固定联想词库 `lua/assoc_fixed.txt`**（v3）：4325 个首字 / 28611 条 / 135.5 KB。
+**固定联想词库 `lua/assoc_fixed.txt`**：12510 个首字 / 12510 条 / 278 KB。
 从 `ly_wubi.dict.yaml` 离线生成：取 2~4 字词条，首字当 key、其余当"后续"，
 按词频取每个首字最常用的 12 条；后续 ≥2 字时还要求它本身也是词典里的词，
 避免成语被机械切分（如「冷若冰霜」不会被切成 冷→若冰霜）。
@@ -1155,7 +1155,7 @@ cnnum_1: { label: "一", text: "{function_rime_clear}一" }
 
 ### PC端主题
 
-PC端（小狼毫/鼠须管）使用 `weasel.yaml` 和 `weasel.custom.yaml` 配置，不使用 themes 目录。
+PC端（小狼毫/鼠须管）使用 `weasel.yaml` 配置，不使用 themes 目录。
 
 > ⚠ 明确一下适用范围（2026-09-27）：`themes/` 下的 **14 键 / 26 键布局（`theme.yaml`）
 > 与 `info.yaml` 都是移动端专用**，PC 端不加载它们。所以主题层的任何改动
@@ -1208,11 +1208,13 @@ TouchWB/
 │   ├── Submit_text.lua             # 输入处理与自造词模块
 │   ├── calculator.lua              # 计算器模块
 │   ├── email_suffix_translator.lua # 邮箱后缀补全
+│   ├── help_cmd.lua                # /h 命令帮助列表
 │   ├── input_statistics.lua        # 输入统计模块
 │   ├── new_spelling.lua            # 字根拆分显示
 │   ├── pair_punct.lua              # 配对标点模块（仅26键）
 │   ├── schedule.lua                # 日程模块
 │   ├── smart_assoc.lua             # 智能联想模块（历史记忆 + 逐级联想）
+│   ├── assoc_common.txt            # 联想常用字白名单（字频前8000字）
 │   ├── assoc_fixed.txt             # 固定联想词库（smart_assoc 用，离线生成）
 │   ├── super_sequence.lua          # 手工调频与自动排序模块
 │   ├── super_tips.lua              # 超级提示模块
@@ -1243,23 +1245,25 @@ TouchWB/
 │       ├── res/                    # 主题资源
 │       ├── info.yaml               # 主题信息
 │       └── theme.yaml              # 主题配置
-├── default.custom.yaml             # 默认配置定制
 ├── default.yaml                    # 默认配置（方案列表、开关保存）
+├── installation.yaml               # 安装信息
+├── custom_phrase.txt               # 自造词组
+├── user.yaml                       # 用户级开关状态
+├── predict.db                      # librime 预测语言模型（不能删）
 ├── info.yaml                       # 方案信息
-├── key_bindings.yaml               # 按键绑定配置
 ├── ly_pinyin.dict.yaml                # 拼音词库
 ├── ly_pinyin.schema.yaml              # 拼音方案（依赖）
+├── ly_pinyin_14.schema.yaml           # 14键拼音方案（依赖）
 ├── symbols.yaml                    # 符号配置
 ├── wb_spelling.dict.yaml           # 字根拆分词库
 ├── wb_spelling.schema.yaml         # 字根拆分方案（依赖）
-├── weasel.custom.yaml              # 小狼毫定制配置（PC端）
 ├── weasel.yaml                     # 小狼毫配置（PC端）
 ├── ly_wubi.dict.yaml                  # 五笔词库
 ├── wubi.extended.dict.yaml         # 五笔扩展词库
 ├── ly_wubi.schema.yaml                # 26键纯五笔方案
 ├── ly_wubi_14.schema.yaml             # 14键纯五笔方案
-├── ly_wubi_ly_pinyin.schema.yaml     # 26键五笔拼音混合方案
-├── ly_wubi_ly_pinyin_14.schema.yaml  # 14键五笔拼音混合方案
+├── ly_wubi_pinyin.schema.yaml        # 26键五笔拼音混合方案
+├── ly_wubi_pinyin_14.schema.yaml     # 14键五笔拼音混合方案
 └── README.md                    # 版本更新记录
 ```
 
@@ -1338,17 +1342,17 @@ lua_reverse_db:
 - `lua/*.lua` — 所有 Lua 脚本
 - `lua/lib/*.lua` — 库文件
 - `lua/tips/*.txt` — 超级提示数据
-- **`lua/assoc_fixed.txt` — 智能联想的固定词库（4430 首字 / 42809 条，运行时读取，缺失则联想只剩历史候选、没有固定候选）**
+- **`lua/assoc_fixed.txt` — 智能联想的固定词库（12510 首字 / 12510 条，运行时读取，缺失则联想只剩历史候选、没有固定候选）**
+- **`predict.db` — librime predict 插件的语言模型库（7.15MB，删除后 predictor 无模型可用，不能删）**
 - `opencc/*.json` — OpenCC 配置
 - `themes/14key_wubi`、`themes/26key_wubi` — 主题文件（移动端）
 - ⚠ **`themes/public/` 不要打包** —— 它来自超越输入法程序目录 `space\themes\public`，会随程序更新自动同步到方案里；分发包内置反而会覆盖掉程序的新版本
 - `symbols.yaml` — 符号配置
-- `default.yaml`, `info.yaml`, `key_bindings.yaml` — 基础配置
-- `weasel.yaml`, `weasel.custom.yaml` — PC端配置
+- `default.yaml`, `info.yaml`, `installation.yaml`, `custom_phrase.txt` — 基础配置与自造词
+- `weasel.yaml` — PC端配置
 
 **不要打包的东西**：`*.bak*`（各轮备份）、`*.userdb/`（用户词典）、`lua/sequence_*`（调序数据）、
-`lua/input_stats_ly_*.lua`（运行时统计）、`predict.db`（librime 联想模型，本方案用不到）、
-`*/build/`（部署编译缓存，部署时会自动重建）。
+`lua/input_stats_ly_*.lua`（运行时统计）、`*/build/`（部署编译缓存，部署时会自动重建）。
 
 > ⚠ **`.custom.yaml` 是用户级补丁，不随方案包分发**：Rime 部署时才会把它的 `patch:` 合并到同名
 > schema，别人拿到方案包时它不存在。因此任何想「所有人都生效」的配置都必须写进 `*.schema.yaml`
