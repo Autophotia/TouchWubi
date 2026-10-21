@@ -27,6 +27,9 @@ user.yaml
 # 运行时被数据覆写的统计脚本副本（死代码，统计实际走 input_statistics.lua）
 lua/input_stats_ly_*.lua
 
+# super_sequence 打字序列数据（运行时写 user_data_dir/lua/sequence_<schema>.txt，带时间戳）
+sequence_*.txt
+
 # 系统杂项
 .DS_Store
 Thumbs.db
