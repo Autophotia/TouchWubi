@@ -1,0 +1,27 @@
+# TouchWB 方案仓库忽略规则
+# 注意：gitignore 不支持行尾注释，注释必须独立成行
+
+# 编译产物
+build/
+*.bin
+
+# 运行日志
+log/
+*.log
+
+# 用户动态数据库（随使用增长，不入库）
+*.userdb
+*.userdb.log
+*.db-shm
+*.db-wal
+custom_phrase.db
+
+# 备份与临时文件
+*.bak
+*.tmp
+tmp/
+
+# 系统杂项
+.DS_Store
+Thumbs.db
+desktop.ini

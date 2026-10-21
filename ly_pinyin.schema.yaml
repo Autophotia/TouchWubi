@@ -1,0 +1,111 @@
+# encoding: utf-8
+# author: Shawx、Autophotia
+# date: 2025-12-31
+# update_time: "2026-05-20"
+# description: 纯拼音输入模式
+schema:
+  schema_id: ly_pinyin
+  name: "流萤拼音"
+  version: "v2.0"
+  icon: "icons/CN.ico"
+  ascii_icon: "icons/EN.ico"
+  full_icon: "icons/full.ico"
+  half_icon: "icons/half.ico"
+
+  author:
+    - Autophotia
+    - https://github.com/Autophotia/TouchWubi
+  description: |
+    流萤
+      流光一瞬，不羡永恒。
+      萤火虽微，自照前程。
+  dependencies:
+    - ly_wubi
+
+switches:
+  - name: ascii_mode
+    reset: 0              # 默认值为0（中文）
+    states: [ 中, 英 ]
+
+# ASCII 模式切换按键绑定（消除 Missing ascii bindings 警告）
+ascii_composer:
+  good_old_caps_lock: true
+  switch_key:
+    Caps_Lock: clear
+    Control_L: noop
+    Control_R: noop
+    Eisu_toggle: clear
+    Shift_L: commit_code
+    Shift_R: commit_code
+
+engine:
+  processors:
+    - lua_processor@*calc_symbol_processor
+    - ascii_composer
+    - recognizer
+    - key_binder
+    - speller
+    - punctuator
+    - selector
+    - navigator
+    - express_editor
+  segmentors:
+    - ascii_segmentor
+    - matcher
+    - abc_segmentor
+    - punct_segmentor
+    - fallback_segmentor
+  translators:
+    - lua_translator@*calculator
+    - punct_translator
+    - script_translator
+    - reverse_lookup_translator
+  filters:
+    - simplifier
+    # - reverse_lookup_filter@ci_reverse_lookup # 注释本行去掉拼音模式下编码提示
+    - uniquifier
+
+speller:
+  alphabet: zyxwvutsrqponmlkjihgfedcba@=
+  delimiter: " '"
+  algebra:
+    - abbrev/^([a-z]).+$/$1/
+    - abbrev/^([zcs]h).+$/$1/
+    - derive/^([nl])ue$/$1ve/
+    - derive/^([jqxy])u/$1v/
+    - derive/un$/uen/
+    - derive/ui$/uei/
+    - derive/iu$/iou/
+    - derive/([aeiou])ng$/$1gn/
+    - derive/([dtngkhrzcs])o(u|ng)$/$1o/
+    - derive/ong$/on/
+    - derive/ao$/oa/
+    - derive/([iu])a(o|ng?)$/a$1$2/
+
+translator:
+  dictionary: ly_pinyin
+  preedit_format:
+    - xform/([nl])v/$1ü/
+    - xform/([nl])ue/$1üe/
+    - xform/([jqxy])v/$1u/
+
+punctuator:
+  import_preset: symbols
+
+key_binder:
+  # 从 default.yaml 继承通用按键绑定（tips_key/sequence/bindings）
+  import_preset: default
+
+recognizer:
+  import_preset: default
+  patterns:
+    expression: "^=.+$"
+    punct: '^/([0-9]0?|[A-Za-z]+)$'
+    reverse_lookup: "^z[a-z]*'?$"
+  
+ci_reverse_lookup:
+  dictionary: wubi.extended
+  enable_completion: true
+  tips: 〈拼音〉  
+
+  

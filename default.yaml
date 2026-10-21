@@ -1,0 +1,113 @@
+# encoding: utf-8
+# author: Shawx、Autophotia
+# date: 2026-01-17
+# description: 默认配置设置
+
+config_version: '2.3'                                  # 指定使用的 Rime 配置语法版本，注意这个不能删除
+
+schema_list:                                           # 定义可用的输入方案列表
+  - {schema: ly_wubi_pinyin}                           # 方案3：流萤双混
+  - {schema: ly_wubi_pinyin_14}                        # 方案4：拇指双混
+  - {schema: ly_wubi}                                  # 方案1：流萤五笔
+  - {schema: ly_wubi_14}                               # 方案2：拇指五笔
+  # - {schema: wb_spelling}                              # 方案5：三重注解伪方案
+
+switcher:                                              # 方案切换设置
+  caption: 【输入法设置】                              # 切换菜单的标题
+  hotkeys:                                             # 触发切换的快捷键
+    - Control+0                                        # 快捷键1：Ctrl+0
+    - Control+Shift+0                                  # 快捷键2：Ctrl+Shift+0
+
+punctuator:                                            # 标点符号设置
+  full_shape:                                          # 全角标点配置
+    __include: symbols:/punctuator/full_shape
+  half_shape:                                          # 半角标点配置
+    __include: symbols:/punctuator/half_shape
+  ascii_style:                                         # ASCII标点配置
+    __include: symbols:/punctuator/ascii_style
+
+recognizer:                                            # 模式识别器（用于特殊输入模式）
+  patterns:                                            # 正则表达式模式
+    email: "^[A-Za-z][-_.0-9A-Za-z]*@.*$"              # 邮箱地址识别
+    # uppercase: "[A-Z][-_+.'0-9A-Za-z]*$"             # 大写字母模式（已注释）
+    url: "^(www[.]|https?:|ftp[.:]|mailto:|file:).*$|^[a-z]+[.].+$"  # URL识别
+
+key_binder:                                            # 键盘绑定设置（通用块，各方案 import_preset: default 引用）
+  # 超级提示上屏键配置
+  tips_key: "slash"
+
+  # Super Sequence（超序列）功能配置：候选项快速排序
+  sequence:
+    # 向上移动：Ctrl+J 将当前候选项前移
+    up: "Control+j"
+    # 向下移动：Ctrl+K 将当前候选项后移
+    down: "Control+k"
+    # 重置排序：Ctrl+L 恢复原始排序
+    reset: "Control+l"
+    # 置顶：Ctrl+P 将当前候选项置顶
+    pin: "Control+p"
+
+  # 按键绑定规则列表
+  bindings:
+    - {send: Up, accept: Up, when: has_menu}
+    - {send: Down, accept: Down, when: has_menu}
+    - {send: Page_Up, accept: Left, when: has_menu}
+    - {send: Page_Down, accept: Right, when: has_menu}
+    - {send: Page_Down, accept: equal, when: has_menu}
+    # 当有候选菜单时，空格键保持原样（选中第一个候选项）
+    - {send: space, accept: space, when: has_menu}
+    # 正在输入时，空格键发送Esc键（取消输入）
+    - {send: Escape, accept: space, when: composing}
+    # Ctrl+Shift+4 切换简繁体
+    - {toggle: zh_trad, accept: "Control+Shift+4", when: always}
+    # Ctrl+Shift+$ 切换简繁体（美元符号）
+    - {toggle: zh_trad, accept: "Control+Shift+dollar", when: always}
+    # Ctrl+Shift+F 切换简繁体
+    - {toggle: zh_trad, accept: "Control+Shift+F", when: always}
+    # Ctrl+Shift+H 切换字根显示
+    - {toggle: new_spelling, accept: "Control+Shift+H", when: always}
+    # Ctrl+Shift+J 切换拼音显示
+    - {toggle: new_hide_pinyin, accept: "Control+Shift+J", when: always}
+    # Ctrl+Shift+K 切换编码显示
+    - {toggle: new_hide_code, accept: "Control+Shift+K", when: always}
+    # Ctrl+Shift+E 切换Emoji显示
+    - {toggle: show_es, accept: "Control+Shift+E", when: always}
+    # Ctrl+Shift+U 切换字符集
+    - {toggle: GB2312, accept: "Control+Shift+U", when: always}
+    # Shift+空格 切换全半角
+    - {when: always, accept: Shift+space, toggle: full_shape}
+    # Ctrl+. 切换标点全半角
+    - {when: always, accept: Control+period, toggle: ascii_punct}
+    # Control+Shift+P 切换配对标点开关
+    - {toggle: pair_symbol, accept: "Control+Shift+P", when: always}
+    # 分号引号上屏二三候选
+    - {accept: semicolon, send: 2, when: has_menu}
+    - {accept: apostrophe, send: 3, when: has_menu}
+
+    # 小键盘数字映射到主键盘，支持计算器输入数字金额等场景
+    - {accept: KP_0, send: 0, when: composing}
+    - {accept: KP_1, send: 1, when: composing}
+    - {accept: KP_2, send: 2, when: composing}
+    - {accept: KP_3, send: 3, when: composing}
+    - {accept: KP_4, send: 4, when: composing}
+    - {accept: KP_5, send: 5, when: composing}
+    - {accept: KP_6, send: 6, when: composing}
+    - {accept: KP_7, send: 7, when: composing}
+    - {accept: KP_8, send: 8, when: composing}
+    - {accept: KP_9, send: 9, when: composing}
+    # 小键盘小数点映射为主键盘小数点
+    - {accept: KP_Decimal, send: period, when: composing}
+    # 小键盘加号映射为主键盘加号
+    - {accept: KP_Add, send: plus, when: composing}
+    # 小键盘减号映射为主键盘减号
+    - {accept: KP_Subtract, send: minus, when: composing}
+    # 小键盘乘号映射为主键盘星号
+    - {accept: KP_Multiply, send: asterisk, when: composing}
+    # 小键盘除号映射为主键盘斜杠
+    - {accept: KP_Divide, send: slash, when: composing}
+    # 保证 / 键可用（日程命令、超级提示上屏）
+    - {accept: slash, send: slash, when: always}
+
+menu:                                                  # 候选词菜单设置
+  page_size: 9                                         # 每页显示6个候选词
+  alternative_select_labels: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ]  # 候选词选择标签

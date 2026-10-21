@@ -1,0 +1,313 @@
+# ===================================================
+# 拇指布局输入方案 (14键布局优化版)
+# author: Autophotia
+# date: 2026-05-15
+# ===================================================
+# 特性：
+#   - 自动继承主方案所有功能
+#   - 专为拇指输入优化添加 14 键位映射（w→q, r→e... ）
+#   - 提高拇指输入效率
+#   - 配合14键专用音辅版字典可有效降低重码。
+# ===================================================
+
+# 🔁 继承基础方案
+__include: ly_wubi.schema:/
+
+schema:
+  schema_id: &schema ly_wubi_14
+  name: "拇指五笔"
+
+  author:
+    - Autophotia
+    - https://github.com/Autophotia/TouchWubi
+  description: |
+    流萤
+      流光一瞬，不羡永恒。
+      萤火虽微，自照前程。
+# 功能开关列表配置
+switches:
+  # 开关1：编码（五笔码）显示控制
+  - name: new_hide_code
+    reset: 0
+    states: [ 隐编码, 显编码 ]
+    comment: "显示/隐藏五笔字型编码（单字）"
+
+  # 开关2：字根（部件拆分）显示控制
+  - name: new_spelling
+    reset: 0                # 默认值为1（显示部件拆分）
+    states: [ 隐字根, 显字根 ]
+    comment: "显示/隐藏汉字部件拆分（字根）"
+
+  # 开关3：单字拼音显示控制
+  - name: new_hide_pinyin
+    reset: 0
+    states: [ 隐拼音, 显拼音 ]
+    comment: "显示/隐藏单字带声调拼音"
+
+  # 开关4：字符集控制（GB2312）
+  - name: GB2312
+    reset: 1                # 默认值为1（常用字符集；判据=GB2312 6763，见 new_spelling.lua）
+    states: [ 扩展, 常用 ]
+    comment: "常用字符集（GB2312）过滤"
+
+  # 开关5：配对标点控制（pair_symbol）
+  - name: pair_symbol
+    reset: 1                # 默认值为1（开启配对）
+    states: [ "单标点", "双标点" ]
+    comment: "配对标点（括号、引号等自动成对）"
+
+  # 开关6：Emoji表情显示控制（show_es）
+  - name: show_es
+    reset: 0                # 默认值为0（隐藏表情）
+    states: [ 隐表情, 显表情 ]
+    comment: "Emoji 表情"
+
+  # 开关7：超级提示控制（super_tips）
+  - name: super_tips
+    reset: 0                # 默认值为0（关闭提示）
+    states: [ 关超提, 开超提 ]
+    comment: "超级提示"
+
+  # 开关8：简繁转换控制（zh_trad）
+  - name: zh_trad
+    reset: 0                # 默认值为0（简体）
+    states: [ 简体, 繁体 ]
+    comment: "简繁转换"
+
+  # 开关9：半/全角转换控制（full_shape）
+  - name: full_shape
+    reset: 0                # 默认值为0（半角字符）
+    states: [ 半角, 全角 ]
+    comment: "字符全角/半角"
+
+  # 开关10：标点符号全半角控制（ascii_punct）
+  - name: ascii_punct
+    reset: 0                # 默认值为0（全角标点）
+    states: [ 。，,．， ]
+    comment: "标点符号全角/半角"
+  # 自动调频控制（auto_freq）：打过的词自动往前排
+  - name: auto_freq
+    reset: 1                # 默认值为1（开启自动调频）
+    states: [ 手调频, 自调频 ]
+    comment: "自动调频（连续两次上屏同一个词才提前，达标后位置固定，不会因为多打几次又抢到第一；/txzq 清空记录）"
+
+
+  # 智能联想控制（smart_assoc）：记住上屏过的词和顺序，逐级联想
+  - name: smart_assoc
+    reset: 1                # 默认值为1（开启方案联想）
+    # ★★★★★ S95 更名：智能联想 / 官方联想⇒ **方案联想 / 应用联想**
+    #   【用户 S95 原话】
+    #   「prediction 是直接写进方案的联想总开关，而应用的联想补丁是
+    #     补丁进的联想总开关。他们的作用是一样的。」
+    #   ⇒ 按「谁的联想」命名，比按「开关叫什么」清楚得多：
+    #     方案联想 = 本方案 smart_assoc 自己算的词（我们的词在前 + 应用词在后）
+    #     应用联想 = 只用应用补丁那份 predictor 的词
+    #   ⚠ 与 prediction（总联想开 / 总联想关）的区别：
+    #     prediction是**总闸**（决定联想发不发生，可自由切换）
+    #     smart_assoc 是**内容选择**（决定联想里谁的词在前，可自由切换）
+    states: [ 应用联想, 方案联想 ]
+    comment: "★ 方案联想开关。【方案联想】= 我们的联想词库生效（候选来自词库、点候选能连续续链），联想态下长按空格能唤起语音（S80 起不再冲突）。【应用联想】= 只用应用补丁那份官方 predictor 的词，我们的完全不干预。"
+
+  - name: assoc_fixed
+    reset: 1                # 默认值为1（带固定词库）
+    states: [ 纯历史, 带词库 ]
+    comment: "固定联想词库：开=冷启动也有候选；关=只联想自己打过的（万象那种「纯靠养」）"
+  - name: prediction
+    reset: 1
+    states: [ 总联想关, 总联想开 ]
+
+engine:
+  processors:
+    - predictor
+    - lua_processor@*calc_symbol_processor
+    - ascii_composer
+    - lua_processor@*smart_assoc*P     # 智能联想：★ 必须在 Submit_text / punctuator 之前
+    - lua_processor@*Submit_text
+    - lua_processor@*super_tips
+    - lua_processor@*super_sequence*P
+    - lua_processor@*pair_punct*processor
+    - punctuator
+    - recognizer
+    - key_binder
+    - speller
+    - selector
+    - navigator
+    - express_editor
+  filters:
+    - lua_filter@*new_spelling
+    - lua_filter@*super_sequence*S         # 候选字词按词频自动排序（基于 quality 降序）
+    - lua_filter@*super_sequence*F         # 候选字词快捷键手动调序（移动设备send数字调序）
+    - lua_filter@*smart_assoc*F         # 智能联想：/lxql 清空 /lxzt 状态（放 S+F 之后）
+    - lua_filter@*wubi_pinyin_filter       # 重码筛选（第五码拼音首字母筛选），放在S+F之后，在已排序候选基础上筛选
+    - simplifier
+    - simplifier@es_conversion
+    - uniquifier
+  segmentors:
+    - ascii_segmentor
+    - matcher
+    - affix_segmentor@mkst
+    - abc_segmentor
+    - punct_segmentor
+    - fallback_segmentor
+    - lua_segmentor@*pair_punct*segmentor
+  translators:
+    - predict_translator
+    - lua_translator@*smart_assoc*T     # 智能联想：在 predictor 空段上吐联想候选（放最前）
+    - lua_translator@*schedule
+    - lua_translator@*help_cmd                 # 帮助命令（/h、/help，列出全部命令）
+    - punct_translator
+    - table_translator
+    - lua_translator@user_coined_translator
+    - table_translator@fixed
+    - table_translator@mkst
+    - script_translator@wubi_prefix        # 为 wubi_pinyin_filter 提供第 5 码筛选支持（见文末 wubi_prefix 段说明）
+    - reverse_lookup_translator
+    - lua_translator@*calculator
+    - lua_translator@*email_suffix_translator  # 显示常用邮箱后缀
+    - lua_translator@*input_statistics         # 输入统计（/tj 等）
+# ========================================
+# ⌨️ 拼写规则配置（Speller）
+# ========================================
+speller/+:
+  # 字母表：定义可用的字母字符（按字母逆序排列，包含反引号用于自造词）
+  alphabet: zyxwvutsrqponmlkjihgfedcba`/@=
+  # 首字母：定义可作为首字母的字符
+  initials: zyxwvutsrqponmlkjihgfedcba`/@=
+  # 最大编码长度（自造词或者混输模式需要较长的编码）
+  max_code_length: 5                       # 5码拼音筛选特设
+  auto_clear: max_length                   # 6码顶字上屏
+  auto_select: false                       # 自动上屏开关
+  auto_select_pattern: ^;.$                # 分号自动上屏（仅上一句为true时生效）
+  enable_completion: true                  # 启用编码补全：重码筛选时显示4码前缀匹配的候选
+  # 拼写代数规则：定义输入转换规则
+  algebra/+:                               # algebra: 音节/编码变换规则列表,使用 /+/ 表示"追加到原列表末尾"
+# ========================================
+# 🌟 14键映射规则
+# ========================================
+    - derive/w/q/     # W 键 → 视为 Q 区（金）
+    - derive/r/e/     # R 键 → 视为 E 区（月）
+    - derive/y/t/     # Y 键 → 视为 T 区（禾）
+    - derive/i/u/     # I 键 → 视为 U 区（山）
+    - derive/p/o/     # P 键 → 视为 O 区（人）
+    - derive/s/a/     # S 键 → 视为 A 区（日）
+    - derive/f/d/     # F 键 → 视为 D 区（口）
+    - derive/h/g/     # H 键 → 视为 G 区（王）
+    - derive/k/j/     # K 键 → 视为 J 区（田）
+    - derive/c/x/     # C 键 → 视为 X 区（女）
+    - derive/b/v/     # B 键 → 视为 V 区（已）
+    - derive/m/n/     # M 键 → 视为 N 区（力）
+# ========================================
+# 📚 翻译器配置（Translators）
+# ========================================
+translator:
+  dictionary: wubi.extended                 # 使用扩展字典（包含用户词典）
+  prism: *schema                            # 使用的棱镜文件（用于用户词典学习）
+  enable_user_dict: false                   # 禁用用户词典学习
+  encode_commit_history: false              # 编码提交历史（学习用户习惯）
+  enable_encoder: false                     # 禁用编码器（自动生成词组）
+  max_phrase_length: 4                      # 最大词组长度
+  initial_quality: 500                      # 初始质量值（确保基础优先级）
+  enable_completion: true                   # 启用编码补全：允许4码匹配5码前缀
+  enable_sentence: false                    # 禁用句子输入（14键不需要）
+  enable_charset_filter: false
+  db_class: tabledb
+  disable_user_dict_for_patterns:
+    - "^z.*$"
+
+# 用户词典翻译器（自动学习用户词组，即时生效）
+
+# ================================================================
+# 第五码筛选支持组件（script_translator@wubi_prefix）
+# ----------------------------------------------------------------
+# 本段其余字段（字典、质量、开关……）由 __include 从主方案继承：
+#   librime 对 map 是逐 key 深合并，本地没写的 key 自动取被 include 方案的值。
+#   268 行回归实测：只写下面两行 与 把整段抄一遍 逐字一致（0 差异）。
+#
+# 唯一必须覆盖的是 prism：14 键的棱镜 ly_wubi_14 是按本方案 speller 里那
+#   12 条 derive 别名规则编译出来的音节图；若沿用主方案的 26 键棱镜，
+#   别名串的切分对不上 —— 实测 29 行回归发生变化，5 码筛选整体失效
+#   （taned→坦然地、tanef→空、taneg→和/禾）。
+#   ⇒ 本段可以精简，但**不能整段删掉**（删掉 = 继承主方案棱镜）。
+#
+# 组件本身的作用与「为什么不能换成 table_translator」见主方案同段注释。
+# ================================================================
+wubi_prefix:
+  prism: *schema                            # ★ 14键专用棱镜，不能沿用主方案的
+  enable_completion: false                  # 与主方案一致，显式写出以自解释
+
+# 用户词典翻译器（自动学习用户词组，即时生效）
+fixed:
+  db_class: tabledb
+  dictionary: wubi.extended                 # 使用扩展字典（包含用户词典）
+  prism: *schema                            # 使用独立的棱镜文件，确保词频排序正确
+  disable_user_dict_for_patterns:
+    - "^z.*$"
+  enable_charset_filter: false
+  enable_completion: false
+  enable_encoder: false
+  enable_sentence: false
+  enable_user_dict: false
+  encode_commit_history: false
+  initial_quality: 510                      # 略高于主词典，确保用户词优先但不覆盖精确匹配
+  max_phrase_length: 4
+
+# 自造词临时翻译器（`键引导）
+mkst:
+  db_class: tabledb
+  dictionary: wubi.extended                 # 使用扩展字典（包含用户词典）
+  prism: *schema                            # 使用独立的棱镜文件
+  disable_user_dict_for_patterns:
+    - "^z.*$"
+  enable_charset_filter: false
+  enable_completion: false
+  enable_encoder: false
+  enable_sentence: true
+  enable_user_dict: false
+  encode_commit_history: false
+  initial_quality: 450
+  max_phrase_length: 4
+  prefix: "`"
+  tag: mkst
+  tips: "〔自造词〕"
+# ========================================
+# 🔍 识别器增强：支持短码快速上屏
+# ========================================
+recognizer/+:
+  patterns/+:
+    short_code: "^[a-z]{1,3}$"              # 14键特有短码识别
+
+lua_reverse_db:
+  spelling: wb_spelling
+  code: wb_spelling
+
+reverse_lookup/+:
+  prism: ly_pinyin_14
+
+wubi_pinyin_filter:            # 该段显式配置优先级高于脚本检测
+  use_key_pairs: true          # 按键对扩展：true = 14键模糊，false = 26键精确
+  use_last_char: true          # 首末字筛选：true = 末字筛选，false = 首字筛选
+  predict_cap_1: 3           # 1 码：一级简码之外最多带几条「前缀预测」
+  predict_cap_2: 6           # 2 码：二级简码之外最多带几条（0 = 完全不预测）
+  predict_cap_3: 5           # 3 码：三级简码之外最多带几条
+
+# ================================================================
+# predictor 本体（★ S100：从 .custom.yaml 固化进主方案）
+# ----------------------------------------------------------------
+# db: predict.db —— librime predict 插件的语言模型库，7.15MB，**不能删**：
+#   沙箱实测（tools/sandbox_s100_predictdb.py）：缺了这个文件，
+#   predictor 连「空段」都不建（17 次 → 0 次）⇒ 智能联想 + 长按空格语音全灭；
+#   而放一个 0 字节的占位文件更糟 —— 引擎直接抛 C++ 异常（0xe06d7363）。
+#   恢复办法：从任一 Sxx 包里取出 TouchWB/predict.db 放回本文件所在目录
+#   （MD5 b2ca80c453087866a0db49aa0d97cf79，7,499,356 字节）。
+# max_candidates / max_iterations —— 官方联想的质量参数，沿用 S79 取值。
+#   ★ 2026-10-13：max_iterations 10→1（治「中国→长串」续写）；
+#     max_candidates 10→1（降官方噪声，把候选栏让给本方案 smart_assoc 联想）。
+#     10 会让 predictor 把「下一个词」贪心续写最多 10 轮，拼成一条长串
+#     （如「中国」→「中国大陆的说明一切都好…」这种局部像话、全局胡言的 artifact，
+#     是浅层 n-gram 的固有毛病）；1 只预测紧接的下一个词/短语，回到词级联想。
+#     长串续写能力放弃（对五笔日常输入为净收益）。如需整句续写可调回 2~3。
+# ================================================================
+predictor:
+  db: predict.db
+  max_candidates: 1
+  max_iterations: 1
