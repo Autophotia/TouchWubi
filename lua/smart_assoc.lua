@@ -41,7 +41,7 @@
 -- 组件：
 --   P（processor）学习上屏 + 维护联想链 + 推占位符
 --   T（translator）在 "›" 段上吐候选
---   F（filter）只处理 /lxql /lxgc /lxdj /lxzt 四个命令，其余原样放过
+--   F（filter）只处理 /lxqk /lxql /lxdj /lxzt /lxdc /lxdr 六个命令，其余原样放过
 --
 -- 挂载位置（硬约束，别随便挪）：
 --   P（processor） → 必须放在 `lua_processor@*Submit_text` **之前**。
@@ -61,10 +61,12 @@
 --   两条路径用 _just_learned 去重，同一条上屏只学一次。
 --
 -- 命令（沿用「功能拼音首字母」约定，联想 = lx）：
---   /lxql  联想清理   清空用户历史联想记录（整个库重来）
---   /lxgc  联想回收   只删过期条目（EXPIRY_DAYS 天没再用过），保留还记得的
+--   /lxqk  联想清空   清空用户历史联想记录（整个库重来）
+--   /lxql  联想清理   只删过期条目（EXPIRY_DAYS 天没再用过），保留还记得的
 --   /lxdj  联想断句   手动断句（详见上文判据说明）
 --   /lxzt  联想状态   自检：开关 / 上下文 / 命中码 / 已学条数
+--   /lxdc  联想导出   导出历史联想记录至 assoc_<schema_id>.txt（已有更优备份时拒绝覆盖）
+--   /lxdr  联想导入   从 txt 合并进当前库（count/时间戳取大，幂等）
 --
 -- ★ 衰减淘汰（2026-09-29 J-2）：排序不再纯看次数，而是
 --     score = 次数 × DECAY_RATE ^ 距今天数
@@ -143,12 +145,12 @@ local _common_n = 0
 -- ★★ 2026-09-29 J-2 衰减淘汰（移植自万象 user_predict.lua 的
 --     score = count × DECAY_RATE ^ age_days，改了 rate 以适配联想库的语义）
 --   老行为：排序纯看 count，时间戳只当同分 tiebreak ⇒ 三年前打过 100 次的词
---     永远压在今天打了 10 次的词前面，且只有 /lxql 全清一条出路。
+--     永远压在今天打了 10 次的词前面，且只有 /lxqk 全清一条出路。
 --   现在：score = count × DECAY_RATE ^ (距今天数)。
 --     rate 0.90 ⇒ 一个打过 100 次的老词，约 22 天后与「打了 10 次的新词」同分；
 --     万象给词组预测用的是 0.85（≈14 天），联想库更即时，这里放宽到 0.90。
 --     想更快淘汰就调小（0.85 / 0.80），想更恋旧就调大（0.95）。
---   EXPIRY_DAYS：超过这么久没再被用过 ⇒ 视为过期，/lxgc 时回收（也可在写入
+--   EXPIRY_DAYS：超过这么久没再被用过 ⇒ 视为过期，/lxql 时清理（也可在写入
 --     同一 key 时顺手清，见 record）。
 local DECAY_RATE  = 0.90         -- 每过 1 天，记忆权重乘以它（1.0 = 关掉衰减）
 local EXPIRY_DAYS = 180          -- 过期天数（半年没再出现 ⇒ 回收）
@@ -356,7 +358,7 @@ end
 --   37 次空段轮次里 `size=0 back=nil` —— 全部发生在**任何上屏之前**。
 --   它和 toks 一样受制于「空段建立早于结算」这条时序，不能单独当判据。
 --
--- 生命周期：settle_commit 写；break_sentence / clear_assoc / /lxql 清空。
+-- 生命周期：settle_commit 写；break_sentence / clear_assoc / /lxqk 清空。
 local _last_ctx = nil
 
 -- 固定词库（懒加载）
@@ -2760,6 +2762,154 @@ local F = {}
 function F.init(env) end
 function F.fini(env) end
 
+-- ===================================================================
+-- 联想库导出 / 导入（/lxdc /lxdr，2026-10-23 新增）
+-- -------------------------------------------------------------------
+-- 【解决什么问题】两台设备（PC + 手机）各自养各自的「词脑」；换机 / 重装 /
+--   清数据后历史联想从零开始。导出成 txt ⇒ txt 即同步载体（dufs / 微信 /
+--   U 盘，通道不限），另一台设备导入合并。
+--
+-- 【蓝本与差异】蓝本 super_sequence.lua 的 /txdc /txdr（调序库导入导出）。
+--   蓝本 /txdr 按「时间戳新者覆盖」合并——调序库一条记录一个键，覆盖语义清晰；
+--   联想库是 (上下文,后续) 多条记录共享前缀，两台设备会各自累加同一个键的
+--   count ⇒ 覆盖会丢另一台的学习量，相加会因重复导入膨胀。
+--   ⇒ 本模块用 **max 合并**（count / timestamp 逐字段取大）：
+--     幂等（同文件导 N 次无副作用）+ 无损（不丢任一侧学习量）+ 零额外状态。
+--
+-- 【txt 格式】每行：上下文 \t 后续 \t 次数 \t 时间戳
+--   （不含 \003as| 内部前缀，导入时拼回；UTF-8 带 BOM，与人看的 sequence 备份同风格）
+--   文件头 4 行 #/schema_id、#/user_id、#/version、#/entries 供校验与溯源。
+--
+-- 【导出保护】备份存在且当前库的 count 总和 <= 备份的 count 总和 ⇒ 拒绝导出。
+--   防 /lxqk 清库后误 /lxdc 把空库导出、覆盖掉几天养出来的好备份。
+--   count 总和比条目数更语义化：清库时条目和 count 一起归零，总和直接反映学习量。
+-- ===================================================================
+local function assoc_export_path(sid)
+    if not sid then return nil end
+    local base = ""
+    pcall(function()
+        if rime_api and rime_api.get_user_data_dir then
+            base = rime_api.get_user_data_dir() or ""
+        end
+    end)
+    if base == "" then return "lua/assoc_" .. sid .. ".txt" end
+    if not base:match("[/\\]$") then base = base .. "/" end
+    return base .. "lua/assoc_" .. sid .. ".txt"
+end
+
+-- 备份 txt 的 count 总和（导出保护判据；文件不存在返回 0）
+local function txt_count_sum(path)
+    if not path then return 0 end
+    local file = io.open(path, "rb")
+    if not file then return 0 end
+    local content = file:read("*a")
+    file:close()
+    if content:sub(1, 3) == "\xef\xbb\xbf" then content = content:sub(4) end
+    local sum = 0
+    for line in content:gmatch("[^\r\n]+") do
+        if line:sub(1, 1) ~= "#" then
+            local c = line:match("\t(%d+)\t%d+$")
+            if c then sum = sum + tonumber(c) end
+        end
+    end
+    return sum
+end
+
+-- 导出：返回 (条数, err)。err = "protected" 表示被保护条件拒绝
+local function export_assoc(db, sid)
+    if not sid then return nil, "no_sid" end
+    if not db or not db:loaded() then return nil, "no_db" end
+    local path = assoc_export_path(sid)
+    if not path then return nil, "no_path" end
+
+    local acc = db:query(ASSOC_PREFIX)
+    if not acc then return nil, "no_query" end
+    local lines, n, sum = {}, 0, 0
+    for k, v in acc:iter() do
+        if k:sub(1, #ASSOC_PREFIX) == ASSOC_PREFIX then
+            local body = k:sub(#ASSOC_PREFIX + 1)
+            local ctx, cont = body:match("^(.-)" .. SEP .. "(.*)$")
+            local c, t = tostring(v):match("^(%d+)" .. SEP .. "(%d+)$")
+            if ctx and cont and c and t then
+                lines[#lines + 1] = string.format("%s\t%s\t%s\t%s", ctx, cont, c, t)
+                n = n + 1
+                sum = sum + tonumber(c)
+            end
+        end
+    end
+    acc = nil
+    if n == 0 then return 0, nil end
+
+    -- 导出保护：备份存在且当前库学习量不超过它 ⇒ 拒绝覆盖
+    local tsum = txt_count_sum(path)
+    if tsum > 0 and sum <= tsum then return nil, "protected" end
+
+    local file = io.open(path, "wb")
+    if not file then return nil, "no_file" end
+    file:write("\xef\xbb\xbf")
+    file:write(string.format("#/schema_id\t%s\n", tostring(sid)))
+    file:write(string.format("#/user_id\t%s\n",
+                os.getenv("USERNAME") or os.getenv("USER") or "unknown1"))
+    file:write("#/version\t1\n")
+    file:write(string.format("#/entries\t%d\n", n))
+    for _, l in ipairs(lines) do
+        file:write(l)
+        file:write("\n")
+    end
+    file:close()
+    return n, nil
+end
+
+-- 导入：返回 (ok, imported, skipped, err)
+--   imported = 实际写入/提升的条数；skipped = 格式损坏跳过的行数
+local function import_assoc(db, sid)
+    if not sid then return false, 0, 0, "no_sid" end
+    if not db or not db:loaded() then return false, 0, 0, "no_db" end
+    local path = assoc_export_path(sid)
+    local file = path and io.open(path, "rb")
+    if not file then return false, 0, 0, "no_file" end
+    local content = file:read("*a")
+    file:close()
+    if content:sub(1, 3) == "\xef\xbb\xbf" then content = content:sub(4) end
+
+    -- schema 校验：文件头的 schema_id 必须与当前方案一致（没有头也拒绝，
+    -- 确保只接受 /lxdc 导出的本方案备份，防手写文件误灌）
+    local head_ok = false
+    for line in content:gmatch("[^\r\n]+") do
+        local s = line:match("^#/schema_id\t(.+)$")
+        if s then head_ok = (s == tostring(sid)) break end
+    end
+    if not head_ok then return false, 0, 0, "schema_mismatch" end
+
+    local imported, skipped = 0, 0
+    for line in content:gmatch("[^\r\n]+") do
+        if line ~= "" and line:sub(1, 1) ~= "#" then
+            local ctx, cont, c, t = line:match("^([^\t]+)\t([^\t]+)\t(%d+)\t(%d+)$")
+            if ctx and cont and ctx ~= "" and cont ~= "" then
+                c, t = tonumber(c), tonumber(t)
+                local k = ASSOC_PREFIX .. ctx .. SEP .. cont
+                local old = db:fetch(k)
+                if old then
+                    -- max 合并：逐字段取大 ⇒ 幂等且不丢任一侧的学习量
+                    local oc, ot = tostring(old):match("^(%d+)" .. SEP .. "(%d+)$")
+                    oc, ot = tonumber(oc) or 0, tonumber(ot) or 0
+                    local nc, nt = math.max(c, oc), math.max(t, ot)
+                    if nc ~= oc or nt ~= ot then
+                        db:update(k, nc .. SEP .. nt)
+                        imported = imported + 1
+                    end
+                else
+                    db:update(k, c .. SEP .. t)
+                    imported = imported + 1
+                end
+            else
+                skipped = skipped + 1
+            end
+        end
+    end
+    return true, imported, skipped, nil
+end
+
 function F.func(input, env)
     local ctx = env.engine.context
     _ctx = ctx                       -- 给 fixed_on() 读开关用
@@ -2771,7 +2921,7 @@ function F.func(input, env)
     local inp = ""
     pcall(function() inp = ctx.input or "" end)
 
-    if inp == "/lxql" then
+    if inp == "/lxqk" then
         local db = get_db(sid)
         local n = 0
         if db then
@@ -2793,10 +2943,10 @@ function F.func(input, env)
         return
     end
 
-    -- ★ J-2 联想回收：只删**过期**条目（超过 EXPIRY_DAYS 天没再被用过），
-    --   不是清空。想整个库重来请用 /lxql。过期条目靠衰减已经排不上号了，
+    -- ★ J-2 联想清理：只删**过期**条目（超过 EXPIRY_DAYS 天没再被用过），
+    --   不是清空。想整个库重来请用 /lxqk。过期条目靠衰减已经排不上号了，
     --   留着只是占库；清掉能让 /lxzt 里的条数回到真实「还记得」的规模。
-    if inp == "/lxgc" then
+    if inp == "/lxql" then
         local db = get_db(sid)
         local n, total = 0, 0
         if db then
@@ -2815,7 +2965,7 @@ function F.func(input, env)
             n = #dead
         end
         yield(Candidate("assoc_cmd", 0, #inp,
-                        string.format("※ 已回收过期联想 %d 条（库中共 %d 条，%d 天未用视为过期）",
+                        string.format("※ 已清理过期联想 %d 条（库中共 %d 条，%d 天未用视为过期）",
                                       n, total, EXPIRY_DAYS), ""))
         return
     end
@@ -2865,6 +3015,57 @@ function F.func(input, env)
             cm = "常用字表[未加载⇒不拦]"
         end
         yield(Candidate("assoc_cmd", 0, inp, "※ " .. cm, ""))
+        return
+    end
+
+    -- 联想库导出（/lxdc）：当前方案的历史联想记录 → assoc_<schema_id>.txt
+    if inp == "/lxdc" then
+        local db = get_db(sid)
+        if not db or not db:loaded() then
+            yield(Candidate("assoc_cmd", 0, #inp, "※ 导出失败：数据库连接失败", ""))
+            return
+        end
+        local n, err = export_assoc(db, sid)
+        if err == "protected" then
+            yield(Candidate("assoc_cmd", 0, #inp,
+                            "※ 导出失败：已有有效备份且当前库不优于它，请先 /lxdr 恢复", ""))
+        elseif err then
+            yield(Candidate("assoc_cmd", 0, #inp,
+                            "※ 导出失败：未知错误（" .. tostring(err) .. "）", ""))
+        elseif n and n > 0 then
+            yield(Candidate("assoc_cmd", 0, #inp,
+                            string.format("※ 成功导出 %d 条联想记录 → assoc_%s.txt",
+                                          n, tostring(sid)), ""))
+        else
+            yield(Candidate("assoc_cmd", 0, #inp, "※ 导出失败：当前库无联想数据", ""))
+        end
+        return
+    end
+
+    -- 联想库导入（/lxdr）：assoc_<schema_id>.txt → 合并进当前库（max 合并，幂等）
+    if inp == "/lxdr" then
+        local db = get_db(sid)
+        if not db or not db:loaded() then
+            yield(Candidate("assoc_cmd", 0, #inp, "※ 导入失败：数据库连接失败", ""))
+            return
+        end
+        local ok, imported, skipped, err = import_assoc(db, sid)
+        if err == "schema_mismatch" then
+            yield(Candidate("assoc_cmd", 0, #inp,
+                            "※ 导入失败：备份的 schema 与当前方案不符", ""))
+        elseif err == "no_file" then
+            yield(Candidate("assoc_cmd", 0, #inp,
+                            "※ 导入失败：备份文件不存在（assoc_" .. tostring(sid) .. ".txt）", ""))
+        elseif err then
+            yield(Candidate("assoc_cmd", 0, #inp,
+                            "※ 导入失败：未知错误（" .. tostring(err) .. "）", ""))
+        elseif imported > 0 then
+            yield(Candidate("assoc_cmd", 0, #inp,
+                            string.format("※ 成功导入 %d 条（跳过 %d 坏行）", imported, skipped), ""))
+        else
+            yield(Candidate("assoc_cmd", 0, #inp,
+                            "※ 导入完成：无新记录（备份均不优于当前库）", ""))
+        end
         return
     end
 

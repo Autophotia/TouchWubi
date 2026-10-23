@@ -174,7 +174,7 @@ engine:
     # Lua过滤器：超序列过滤器（处理候选项排序）
     - lua_filter@*super_sequence*S         # 候选字词按词频自动排序（基于 quality 降序）
     - lua_filter@*super_sequence*F         # 候选字词快捷键手动调序（移动设备send数字调序）
-    - lua_filter@*smart_assoc*F         # 智能联想：/lxql 清空 /lxzt 状态（放 S+F 之后）
+    - lua_filter@*smart_assoc*F         # 智能联想：/lxqk 清空 /lxzt 状态（放 S+F 之后）
     - lua_filter@*wubi_pinyin_filter       # 重码筛选（第五码拼音首字母筛选），放在S+F之后，在已排序候选基础上筛选
     # 简化器：执行通用简化和过滤操作
     - simplifier
@@ -203,7 +203,7 @@ engine:
   # 翻译器列表（translators）：将输入转换为候选项
   translators:
     - predict_translator
-    # Lua翻译器：日程翻译器（处理 /jt、/jq、/gz、/date 等命令）- 放在最前面确保优先级最高
+    # Lua翻译器：日程翻译器（处理 /jt、/jq、/gz、/nl 等命令）- 放在最前面确保优先级最高
     - lua_translator@*smart_assoc*T     # 智能联想：在 predictor 空段上吐联想候选（放最前）
     - lua_translator@*schedule
     - lua_translator@*help_cmd                 # 帮助命令（/h、/help，列出全部命令）

@@ -32,23 +32,12 @@
 --   📊 均速基于总字数/总连续输入时间（字/分），仅统计持续≥3秒的段
 --   🔄 10秒间隙自动切断连续输入段，统计真实净速度
 --   💾 保存前自动备份（.bak文件）
---   🎤 智能过滤语音输入（候选栏标志法）：
---       - translator 按键时记录候选栏状态，语音不触发 translator
---       - 有候选栏 → 正常打字，无候选栏 → 语音输入
---       - 语音输入时会结算当前手打段并重置状态，避免时间污染
+--   🎯 只统计「按编码打字上屏」：上屏瞬间输入码非空才计入，
+--      点联想词 / 复制粘贴 / 语音转文字（无编码上屏）一律排除。
 --
 -- 【平台配置】请根据您的使用平台修改以下变量
 --   PC版（小狼毫/鼠须管）：MOBILE_MODE = false   （提示不上屏，报告可上屏）
 --   手机版（同文/小企鹅）：MOBILE_MODE = true    （所有内容都可上屏）
-
--- 【语音检测增强参数】用于区分键盘输入和语音输入
--- 当字数超过阈值且距离上次按键间隔超过阈值时，判定为语音输入
--- 注意：阈值设置需平衡准确性和误判风险
---   - 阈值过低：可能将手动输入的长句误判为语音（如思考后输入）
---   - 阈值过高：可能漏检实际的语音输入
--- 建议：若出现误判（长句手打被当语音），可提高阈值至30或50
-local VOICE_LEN_THRESHOLD = 20   -- 字数阈值（默认20字，保守设置）
-local VOICE_GAP_THRESHOLD = 5    -- 时间间隔阈值（秒，默认5秒）
 
 local SEPARATOR_LINE = string.rep("─", 12)
 
@@ -198,9 +187,9 @@ local avgSpdInfo = {
     count = 0             -- 当前段累计字数
 }
 
--- 候选栏状态标志（在 translator 按键阶段记录，commit_notifier 中读取）
--- true = 上屏前有候选栏（按键输入），false = 上屏前无候选栏（语音输入）
-local hadCandidatesBeforeCommit = false
+-- 模块级环境引用（init 时赋值，供 report_commit_text 与 Submit_text 桥接使用）
+local STATS_ENV = nil
+local STATS_SCHEMA_ID = ""
 
 -- 性能优化：文件保存防抖机制
 -- 避免每次输入都写入文件，减少IO开销
@@ -398,37 +387,6 @@ local function update_fastest(stat, seg_time, seg_count)
     end
 end
 
--- 语音输入检测
---
--- 核心逻辑：
--- hadCandidatesBeforeCommit == true → 按键输入，放行
--- hadCandidatesBeforeCommit == false → 可能是语音输入，需进一步判断
---
--- 注意：若用户先键盘输入（标志变为true），随后立即使用语音输入（不经过translator），
--- 标志仍为true，会导致语音被误判。因此需要结合时间间隔进行辅助判断。
---
--- @return: true=语音输入(应过滤), false=正常按键输入
-local function is_voice_input()
-    -- 上屏前有候选栏 → 一定是按键输入
-    if hadCandidatesBeforeCommit then
-        return false
-    end
-
-    -- 无候选栏，但检查与最后一次按键的间隔
-    -- 如果间隔过长（超过阈值），说明不是连续按键输入，可能是语音
-    local timeNow = os.time()
-    local gap = timeNow - avgSpdInfo.clickTime
-
-    -- 如果最后一次按键在 10 秒之前，且当前无候选栏，则视为语音输入
-    -- 10 秒是连续输入段的间隙阈值
-    if gap > avgSpdInfo.gapThd then
-        return true
-    end
-
-    -- 间隔较短，可能是快速输入或异常情况，保守起见视为按键输入
-    return false
-end
-
 -- 更新统计数据（核心：处理连续输入段）
 -- @param input_length: 本次上屏字数（0 表示仅结算段）
 -- @param is_segment_end: 1 表示当前段结束，需要将本段时间和字数存入统计
@@ -533,6 +491,76 @@ local function update_stats(input_length, is_segment_end, env)
         input_stats.lengths[input_length] = (input_stats.lengths[input_length] or 0) + 1
     end
 end
+
+-- ★ 上屏计数入口（commit_notifier 与 Submit_text 快捷上屏桥接共用）
+--   只统计「按编码打字上屏」的内容；编码非空判据由调用方负责：
+--   - commit_notifier：先判 ctx.input 非空再调用（排除点联想/复制/语音）
+--   - Submit_text 快捷上屏：空格/分号/引号本就是编码上屏，直接调用
+local function report_commit_text(commit_text)
+    if not commit_text or commit_text == "" then return end
+
+    -- 排除统计命令
+    if is_summary_command(commit_text) then return end
+
+    -- 排除统计报告上屏
+    if commit_text:match("^[※◉]") then return end
+
+    -- 只统计汉字长度，排除标点数字
+    local input_length = get_chinese_length(commit_text)
+    local timeNow = os.time()
+
+    -- 连续输入段处理
+    if avgSpdInfo.logSts ~= 1 then
+        avgSpdInfo.logSts = 1
+        avgSpdInfo.startTime = timeNow
+        avgSpdInfo.commitTime = timeNow
+        avgSpdInfo.count = input_length
+    else
+        local delt = timeNow - avgSpdInfo.clickTime
+        if delt > avgSpdInfo.gapThd then
+            if avgSpdInfo.clickTime - avgSpdInfo.startTime >= 1 and avgSpdInfo.count > 0 then
+                update_stats(0, 1, STATS_ENV)
+            end
+            avgSpdInfo.startTime = timeNow
+            avgSpdInfo.count = input_length
+        else
+            avgSpdInfo.count = avgSpdInfo.count + input_length
+        end
+        avgSpdInfo.commitTime = timeNow
+    end
+    avgSpdInfo.clickTime = timeNow
+
+    -- 更新字数统计（不结束段）
+    update_stats(input_length, 0, STATS_ENV)
+
+    -- 更新临时统计
+    if STATS_ENV and STATS_ENV.temp_stats and STATS_ENV.temp_stats.is_collecting then
+        STATS_ENV.temp_stats.count = STATS_ENV.temp_stats.count + 1
+        STATS_ENV.temp_stats.length = STATS_ENV.temp_stats.length + input_length
+
+        local ts = os.time()
+        table.insert(STATS_ENV.temp_stats.recent, {ts = ts, len = input_length})
+        local threshold = ts - 60
+        local current_minute_total = 0
+        local new_recent = {}
+        for _, item in ipairs(STATS_ENV.temp_stats.recent) do
+            if item and item.ts and item.ts >= threshold then
+                current_minute_total = current_minute_total + (item.len or 0)
+                table.insert(new_recent, item)
+            end
+        end
+        STATS_ENV.temp_stats.recent = new_recent
+        if current_minute_total > (STATS_ENV.temp_stats.fastest or 0) then
+            STATS_ENV.temp_stats.fastest = current_minute_total
+        end
+    end
+
+    -- 保存统计（防抖）
+    debounced_save_stats(STATS_SCHEMA_ID)
+end
+
+-- 暴露到全局，供 Submit_text.lua 的快捷上屏（空格/分号/引号）补计数
+_G.InputStats_Report = report_commit_text
 
 -- 序列化工具
 local function serialize_table(tbl, indent)
@@ -856,18 +884,6 @@ end
 local function translator(input, seg, env)
     local schema_name = get_schema_display_name(env)
 
-    -- 【语音检测】每次按键时记录候选栏状态
-    -- 语音输入不触发 translator，标志保持 false
-    local ctx = env.engine.context
-    local composition = ctx.composition
-    -- 安全获取 preedit：小狼毫可能没有 get_preedit 方法
-    local preedit = nil
-    if type(ctx.get_preedit) == "function" then
-        preedit = ctx:get_preedit()
-    end
-    hadCandidatesBeforeCommit = (composition and not composition:empty())
-        or (preedit and preedit.text and #preedit.text > 0)
-
     -- 按键时检测连续输入段是否超时
     local timeNow = os.time()
     if timeNow - avgSpdInfo.clickTime > avgSpdInfo.gapThd then
@@ -964,6 +980,10 @@ local function init(env)
     local ctx = env.engine.context
     local schema_id = env.engine.schema.schema_id
 
+    -- 保存模块级环境，供 report_commit_text 与 Submit_text 桥接使用
+    STATS_ENV = env
+    STATS_SCHEMA_ID = schema_id
+
     -- 加载统计数据（按方案）
     load_stats_from_lua_file(schema_id)
 
@@ -980,109 +1000,18 @@ local function init(env)
     if ctx and ctx.commit_notifier then
         ctx.commit_notifier:connect(function(ctx)
             if not ctx then return end
-            
+
+            -- ★ 编码非空判据：只统计「按编码打字上屏」。
+            --   Commit() 先触发本回调再清空编码，故此刻 ctx.input 即上屏前的编码串。
+            --   点联想词（predictor 空段）/ 复制粘贴 / 语音转文字：编码为空 → 排除。
+            local input_at_commit = nil
+            pcall(function() input_at_commit = ctx.input end)
+            if not input_at_commit or input_at_commit == "" then return end
+
             local commit_text = ctx:get_commit_text()
-            if not commit_text or commit_text == "" then return end
-
-            -- 排除统计命令
-            if is_summary_command(commit_text) then return end
-
-            -- 排除统计报告上屏
-            if commit_text:match("^[※◉]") then return end
-
-            -- 【数据精度优化】只统计汉字长度，排除标点数字
-            local input_length = get_chinese_length(commit_text)
-            local timeNow = os.time()
-
-            -- ========== 增强语音检测 ==========
-            -- 先获取原始标志（基于候选栏状态）
-            local raw_is_voice = is_voice_input()
-
-            -- 二次修正：当原始标志为按键输入（false），但实际符合语音特征时，强制转为语音
-            -- 语音特征：长句 + 长时间无按键 + 无活跃输入段
-            local final_is_voice = raw_is_voice
-            if not raw_is_voice then
-                local time_since_last_click = timeNow - (avgSpdInfo.clickTime or 0)
-                local has_active_segment = (avgSpdInfo.logSts == 1 and avgSpdInfo.count > 0)
-
-                if input_length >= VOICE_LEN_THRESHOLD and
-                    time_since_last_click > VOICE_GAP_THRESHOLD and
-                    not has_active_segment then
-                    final_is_voice = true
-                end
-            end
-
-            local isVoice = final_is_voice
-
-            -- 重置标志，防止影响下一次判断
-            hadCandidatesBeforeCommit = false
-
-            if isVoice then
-                -- 语音输入：结算当前手打段（如果有），然后完全重置状态
-                if avgSpdInfo.logSts == 1 and avgSpdInfo.count > 0 then
-                    local delt = avgSpdInfo.clickTime - avgSpdInfo.startTime
-                    if delt >= 1 then
-                        update_stats(0, 1, env)
-                    end
-                end
-                avgSpdInfo.logSts = 0
-                avgSpdInfo.startTime = 0
-                avgSpdInfo.commitTime = 0
-                avgSpdInfo.clickTime = 0
-                avgSpdInfo.count = 0
-                return
-            end
-
-            -- 以下是正常按键输入的处理
-            -- 连续输入段处理
-            if avgSpdInfo.logSts ~= 1 then
-                avgSpdInfo.logSts = 1
-                avgSpdInfo.startTime = timeNow
-                avgSpdInfo.commitTime = timeNow
-                avgSpdInfo.count = input_length
-            else
-                local delt = timeNow - avgSpdInfo.clickTime
-                if delt > avgSpdInfo.gapThd then
-                    if avgSpdInfo.clickTime - avgSpdInfo.startTime >= 1 and avgSpdInfo.count > 0 then
-                        update_stats(0, 1, env)
-                    end
-                    avgSpdInfo.startTime = timeNow
-                    avgSpdInfo.count = input_length
-                else
-                    avgSpdInfo.count = avgSpdInfo.count + input_length
-                end
-                avgSpdInfo.commitTime = timeNow
-            end
-            avgSpdInfo.clickTime = timeNow
-
-            -- 更新字数统计（不结束段）
-            update_stats(input_length, 0, env)
-            
-            -- 更新临时统计
-            if env.temp_stats and env.temp_stats.is_collecting then
-                env.temp_stats.count = env.temp_stats.count + 1
-                env.temp_stats.length = env.temp_stats.length + input_length
-
-                local ts = os.time()
-                table.insert(env.temp_stats.recent, {ts = ts, len = input_length})
-                local threshold = ts - 60
-                local current_minute_total = 0
-                local new_recent = {}
-                for _, item in ipairs(env.temp_stats.recent) do
-                    if item and item.ts and item.ts >= threshold then
-                        current_minute_total = current_minute_total + (item.len or 0)
-                        table.insert(new_recent, item)
-                    end
-                end
-                env.temp_stats.recent = new_recent
-                if current_minute_total > (env.temp_stats.fastest or 0) then
-                    env.temp_stats.fastest = current_minute_total
-                end
-            end
-            
-            -- 保存统计（使用防抖机制）
-            debounced_save_stats(schema_id)
+            report_commit_text(commit_text)
         end)
+
     end
 end
 

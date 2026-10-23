@@ -627,6 +627,7 @@ local function commit_text_processor(key, env)
         if sel and sel.text and sel.text ~= "" then
             context:clear()
             engine:commit_text(sel.text)
+            if _G.InputStats_Report then _G.InputStats_Report(sel.text) end
             return 1
         end
     end
@@ -647,6 +648,7 @@ local function commit_text_processor(key, env)
                 klog("Submit_text", "committing 3rd candidate: " .. env.last_3th_text.text)
                 context:clear()
                 engine:commit_text(env.last_3th_text.text)
+                if _G.InputStats_Report then _G.InputStats_Report(env.last_3th_text.text) end
             end
             return 1
         end
@@ -659,6 +661,7 @@ local function commit_text_processor(key, env)
             klog("Submit_text", "committing 2nd candidate: " .. env.last_2th_text.text)
             context:clear()
             engine:commit_text(env.last_2th_text.text)
+            if _G.InputStats_Report then _G.InputStats_Report(env.last_2th_text.text) end
             return 1
         end
     end

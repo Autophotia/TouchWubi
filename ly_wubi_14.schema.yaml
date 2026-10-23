@@ -137,7 +137,7 @@ engine:
     - lua_filter@*new_spelling
     - lua_filter@*super_sequence*S         # 候选字词按词频自动排序（基于 quality 降序）
     - lua_filter@*super_sequence*F         # 候选字词快捷键手动调序（移动设备send数字调序）
-    - lua_filter@*smart_assoc*F         # 智能联想：/lxql 清空 /lxzt 状态（放 S+F 之后）
+    - lua_filter@*smart_assoc*F         # 智能联想：/lxqk 清空 /lxzt 状态（放 S+F 之后）
     - lua_filter@*wubi_pinyin_filter       # 重码筛选（第五码拼音首字母筛选），放在S+F之后，在已排序候选基础上筛选
     - simplifier
     - simplifier@es_conversion

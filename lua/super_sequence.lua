@@ -27,7 +27,7 @@
 --   数字键 1    撤销上次调序操作（仅对当前编码有效）
 --
 -- 【其他命令】（均仅影响当前方案）
---   /txql   调序清理（清除所有调序记录，仅清空 userdb，保留备份文件）
+--   /txqk   调序清空（清除所有调序记录，仅清空 userdb，保留备份文件）
 --   /txdc   调序导出（导出调序数据至 sequence_<schema_id>.txt，仅当数据库条目数大于备份时允许覆盖）
 --   /txdr   调序导入（从 sequence_<schema_id>.txt 恢复调序数据）
 --   /txtj   调序统计（查看所有调序记录，按空格上屏）
@@ -74,7 +74,7 @@
 -- 无需识别器配置，脚本通过以下方式判断：
 --   - 检测 Ctrl 键组合（key_event:ctrl()）
 --   - is_function_mode_active() 排除功能模式
---   - 输入 "/txql" 触发清空数据库
+--   - 输入 "/txqk" 触发清空数据库
 --   - 移动端自动检测并启用数字键调序
 --
 -- 注意：
@@ -1421,7 +1421,7 @@ function F.func(input, env)
     current_schema_id = schema_id
     
     -- 处理清空数据库指令（生成空候选）
-    if env.engine.context.input == "/txql" then
+    if env.engine.context.input == "/txqk" then
         clear_database(schema_id)
         yield(Candidate("clear_db", 0, #context.input, "※ 当前方案调序数据库已清空（备份保留）", ""))
         return

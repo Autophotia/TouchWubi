@@ -32,13 +32,13 @@
 -- 可选识别器配置（用于 matcher 优化调度，非必须）：
 -- recognizer:
 --   patterns:
---     schedule: "^/(jc|jq|gz|date)"           # 日程命令模式（可选）
+--     schedule: "^/(jt|jq|gz|nl)"             # 日程命令模式（可选）
 --
 -- 脚本内部通过输入字符串精确匹配判断：
 --   - "/jt" - 显示今天信息（日期、农历、节日、节气倒计时）
 --   - "/jq" - 显示二十四节气
 --   - "/gz" - 显示干支历
---   - "/date" - 显示农历日期转换
+--   - "/nl" - 显示农历日期转换
 --   - "/rq" - 显示日期（多种格式）
 --   - "/sj" - 显示时间
 --   - "/xq" - 显示星期
@@ -245,12 +245,12 @@ local function schedule(input, seg, env)
         generate_candidates("ganzi_query", seg, candidates)
         log_debug("/gz command succeeded")
         
-    elseif (input == "/date") then
-        log_debug("Processing /date command")
+    elseif (input == "/nl") then
+        log_debug("Processing /nl command")
         local current_date = os.date("%Y%m%d")
-        log_debug("/date: calling Date2LunarDate(" .. current_date .. ")")
+        log_debug("/nl: calling Date2LunarDate(" .. current_date .. ")")
         local lunar_date = Date2LunarDate(current_date)
-        log_debug("/date: Date2LunarDate returned: " .. (lunar_date or "nil"))
+        log_debug("/nl: Date2LunarDate returned: " .. (lunar_date or "nil"))
         
         local date_info = "=== 农历日期信息 ===\n"
         date_info = date_info .. string.format("公历：%s年%s月%s日 %s\n", 
@@ -260,13 +260,13 @@ local function schedule(input, seg, env)
         
         -- 添加反向转换示例
         local solar_date = LunarDate2Date(tonumber(os.date("%Y%m%d"):sub(1,6) .. "01"), 0)
-        log_debug("/date: LunarDate2Date returned: " .. (solar_date or "nil"))
+        log_debug("/nl: LunarDate2Date returned: " .. (solar_date or "nil"))
         date_info = date_info .. "------------------------\n"
         date_info = date_info .. string.format("农历本月初一对应的公历：%s\n", solar_date)
         
         -- 添加节气信息
         local jqs = GetNowTimeJq(current_date)
-        log_debug("/date: GetNowTimeJq returned " .. (#jqs or 0) .. " items")
+        log_debug("/nl: GetNowTimeJq returned " .. (#jqs or 0) .. " items")
         for i = 1, math.min(2, #jqs) do
             local jq_name, jq_date = jqs[i]:match("^(%S+)%s+(%d+%-%d+%-%d+)$")
             if jq_name and jq_date then
@@ -281,7 +281,7 @@ local function schedule(input, seg, env)
         
         local candidates = {{date_info, "农历转换"}}
         generate_candidates("lunar_query", seg, candidates)
-        log_debug("/date command succeeded")
+        log_debug("/nl command succeeded")
 
     elseif (input == "/jt") then
         log_debug("Processing /jt command")
@@ -502,7 +502,7 @@ end
 -- /jt   - 显示今天信息（日期、农历、节日、节气倒计时）
 -- /jq   - 显示二十四节气信息
 -- /gz   - 显示干支历信息  
--- /date - 显示农历日期转换信息
+-- /nl - 显示农历日期转换信息
 -- /rq   - 显示日期（多种格式：2025-01-01、2025/01/01、2025年1月1日等）
 -- /sj   - 显示时间（HH:MM、HH:MM:SS）
 -- /xq   - 显示星期（星期X、礼拜X、周X）
