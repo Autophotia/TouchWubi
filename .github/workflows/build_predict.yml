@@ -1,0 +1,40 @@
+name: Build minimal predict.db
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout librime
+        uses: actions/checkout@v4
+        with:
+          repository: rime/librime
+
+      - name: Checkout librime-predict as plugin
+        uses: actions/checkout@v4
+        with:
+          repository: rime/librime-predict
+          path: plugins/predict
+
+      - name: Install dependencies
+        run: ./action-install-linux.sh
+
+      - name: Build build_predict tool
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target build_predict
+
+      - name: Generate minimal predict.db
+        working-directory: build/bin
+        run: |
+          printf '某 某 1.0\n' > minimal.txt
+          cat minimal.txt | ../plugins/predict/bin/build_predict
+          ls -la predict.db
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: minimal-predict-db
+          path: build/bin/predict.db
