@@ -55,7 +55,7 @@ D:\AutophotiaIME\
 │   │   ├── themes/   29 套通用主题 + public
 │   │   ├── haptics/ sounds/ speeches/ textflow/ tools/ emoticons/ fonts/ plugins/ …
 │   │   └── log/      app + keyboard + dufs 三类运行日志
-│   ├── docs/              ★ 项目文档（BASELINE.md / 项目指令_v8.md + 4 份设计调研文档，6 文件，已入 git）
+│   ├── docs/              ★ 项目文档（BASELINE.md / 项目指令_v14.md 现行 + v13/v7 留档 + 4 份设计调研文档，8 文件，已入 git）
 │   ├── tools/             工具脚本（pack-release.sh / 验证脚本，4 个 .sh/.py，已入 git）
 │   ├── legacy-remote-b2faab1-backup.zip   旧远端备份（兜底）
 │   └── App场景感知可行性调研.md / 简码越级检查报告.md / 联想增强方案.md
@@ -201,7 +201,8 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | 2026-10-24 | **方案一（古诗文联想脚本）放弃**：assoc_common.txt 字频表错位无法识别难拆字，产出 10301 条但 71% 虚词污染；删除 chinese-poetry 语料（466M） | 决策 | 联想功能维持现状，语料已清 |
 | 2026-10-24 | **BASELINE 过时口径修订**：2.1 目录图 / 四节命令表（以 help_cmd.lua GROUPS 为准）/ 八节代理 7890→socks5h:1080 / 打包 62→61 / git 79→154 全部按实测更新 | 文档 | 本次修订 |
 | 2026-10-25 | **项目文档全部收进 `dev/docs/`**：原 `dev/` 顶层 3 份计划文档（App场景感知调研 / 简码越级检查报告 / 联想增强方案）移入 docs，共 6 份 | 版本控制 | 追踪仍 161 文件，路径变更 |
-| 2026-10-25 | **项目指令升级 v8**：git 根 `dev/`、docs 6 份、追踪 161/26M、历史 17 commit（HEAD `d04f517`）；新增「根上移既定做法」「历史断层警告」「换电脑重建上下文三步」「代理两条启动路径」 | 文档 | v8 为现行，v7 留档 |
+| 2026-10-25 | **项目指令升级 v14**（误命名的 v8 已作废删除）：基线是 v13（此前只存在于会话产物目录未落盘），补 git 根 `dev/`、docs 6 份、追踪 161/26M、HEAD `d762a15`；新增「根上移既定做法」「历史断层」「换机重建三步」，沿用 v13 的 Skill 配置节与产物上传规则 | 文档 | **v14 为现行**，v13/v7 留档 |
+| 2026-10-25 | **版本纪律事故**：v8~v13 由 10-24 会话产出但只落在 `C:\Users\xoaii\WorkBuddy\2026-10-23-14-08-15\`，未写进 `dev/docs/`，导致后续按磁盘 v7 臆断版本号。已写入 v14 第 8 节第 7 条 | 流程 | 新增版本须先全盘检索确认 |
 
 ---
 
@@ -217,7 +218,7 @@ D:\AutophotiaIME\
 │   │   ├── patches\            ← 补丁集（76 文件，已入 git）
 │   │   ├── space.yaml          ← 默认入口（入 git）
 │   │   └── space.custom.yaml   ← 实际生效配置（入 git）
-│   ├── docs\                   ← ★ 项目文档（BASELINE.md / 项目指令_v8.md + 4 份设计调研文档，6 文件，已入 git）
+│   ├── docs\                   ← ★ 项目文档（BASELINE.md / 项目指令_v14.md 现行 + v13/v7 留档 + 4 份设计调研文档，8 文件，已入 git）
 │   ├── tools\                  ← 工具脚本（4 个 .sh/.py，已入 git）
 │   ├── legacy-remote-b2faab1-backup.zip  ← 旧版远端文件备份（已排除 *.zip，不进 git）
 │   └── 计划文档（App场景感知调研.md / 简码越级检查报告.md / 联想增强方案.md，已入 git）
@@ -256,7 +257,7 @@ D:\AutophotiaIME\
 | shadowquic | 4080 | ✅ |
 | naiveproxy | — | ❌（二进制处理连接即崩溃，不可用） |
 
-> 1080 端口六栈共用，同时只能跑一个；验证网络用 `git ls-remote`（勿用 curl）；排障先查进程存活再动配置。完整配方（含节点 IP、两条启动路径、窗口铁律）见 `docs/项目指令_v8.md` 第 5 节。
+> 1080 端口六栈共用，同时只能跑一个；验证网络用 `git ls-remote`（勿用 curl）；排障先查进程存活再动配置。完整配方（含节点 IP、AI 自动启动流程、窗口铁律）见 `docs/项目指令_v14.md` 第 5 节。
 
 ### 日常更新（每次改完执行一条命令）
 
