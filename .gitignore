@@ -1,36 +1,60 @@
-# TouchWB 方案仓库忽略规则
+# TouchWB 仓库（git 根 = dev/space）忽略规则
+# 追踪：schemas/TouchWB、patches、space.yaml、space.custom.yaml、LICENSE、README.md
 # 注意：gitignore 不支持行尾注释，注释必须独立成行
 
-# 编译产物
+# ── 编译产物（任何层级）──
 build/
 *.bin
 
-# 运行日志
+# ── 日志（任何层级）──
 log/
 *.log
 
-# 用户动态数据库（随使用增长，不入库）
+# ── 用户动态数据库（随使用增长，不入库）──
 *.userdb
 *.userdb.log
 *.db-shm
 *.db-wal
 custom_phrase.db
 
-# 备份与临时文件
+# ── 备份与临时文件 ──
 *.bak
 *.tmp
 tmp/
 
-# 本机运行时状态（各设备不同，不入库）
+# ── 本机运行时状态（各设备不同，不入库）──
 user.yaml
+installation.yaml
+.space_update_stamp
 
-# 运行时被数据覆写的统计脚本副本（死代码，统计实际走 input_statistics.lua）
-lua/input_stats_ly_*.lua
-
-# super_sequence 打字序列数据（运行时写 user_data_dir/lua/sequence_<schema>.txt，带时间戳）
+# ── 死代码（统计实际走 input_statistics.lua）──
+**/lua/input_stats_ly_*.lua
 sequence_*.txt
 
-# 系统杂项
+# ── 根目录手机目录自带文件（非方案本体）──
+/README.md
+/LICENSE
+
+# ── 根目录手机运行时资源（非方案本体）──
+/emoticons/
+/fonts/
+/haptics/
+/pasteboard/
+/plugins/
+/resources/
+/sounds/
+/speeches/
+/symbols/
+/textflow/
+/themes/
+/tools/
+/tutorials/
+
+# ── 其他方案（非优化对象）──
+/schemas/bim-pinyin/
+/schemas/bim-wubi/
+
+# ── 系统杂项 ──
 .DS_Store
 Thumbs.db
 desktop.ini
