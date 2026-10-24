@@ -55,7 +55,7 @@ D:\AutophotiaIME\
 │   │   ├── themes/   29 套通用主题 + public
 │   │   ├── haptics/ sounds/ speeches/ textflow/ tools/ emoticons/ fonts/ plugins/ …
 │   │   └── log/      app + keyboard + dufs 三类运行日志
-│   ├── docs/              ★ 项目文档（BASELINE.md / 项目指令_v7.md / 联想库设计，3 文件，已入 git）
+│   ├── docs/              ★ 项目文档（BASELINE.md / 项目指令_v8.md + 4 份设计调研文档，6 文件，已入 git）
 │   ├── tools/             工具脚本（pack-release.sh / 验证脚本，4 个 .sh/.py，已入 git）
 │   ├── legacy-remote-b2faab1-backup.zip   旧远端备份（兜底）
 │   └── App场景感知可行性调研.md / 简码越级检查报告.md / 联想增强方案.md
@@ -200,6 +200,8 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | 2026-10-24 | **git 根二次上移至 `dev/`**（`968a0d5`，fast-forward）：`dev/docs`（3）+ `dev/tools` 脚本（4）+ dev 顶层计划文档（3）纳入追踪 | 版本控制 | 追踪 151→**161 文件/26M**；docs 恢复随 git 上云 |
 | 2026-10-24 | **方案一（古诗文联想脚本）放弃**：assoc_common.txt 字频表错位无法识别难拆字，产出 10301 条但 71% 虚词污染；删除 chinese-poetry 语料（466M） | 决策 | 联想功能维持现状，语料已清 |
 | 2026-10-24 | **BASELINE 过时口径修订**：2.1 目录图 / 四节命令表（以 help_cmd.lua GROUPS 为准）/ 八节代理 7890→socks5h:1080 / 打包 62→61 / git 79→154 全部按实测更新 | 文档 | 本次修订 |
+| 2026-10-25 | **项目文档全部收进 `dev/docs/`**：原 `dev/` 顶层 3 份计划文档（App场景感知调研 / 简码越级检查报告 / 联想增强方案）移入 docs，共 6 份 | 版本控制 | 追踪仍 161 文件，路径变更 |
+| 2026-10-25 | **项目指令升级 v8**：git 根 `dev/`、docs 6 份、追踪 161/26M、历史 17 commit（HEAD `d04f517`）；新增「根上移既定做法」「历史断层警告」「换电脑重建上下文三步」「代理两条启动路径」 | 文档 | v8 为现行，v7 留档 |
 
 ---
 
@@ -215,7 +217,7 @@ D:\AutophotiaIME\
 │   │   ├── patches\            ← 补丁集（76 文件，已入 git）
 │   │   ├── space.yaml          ← 默认入口（入 git）
 │   │   └── space.custom.yaml   ← 实际生效配置（入 git）
-│   ├── docs\                   ← ★ 项目文档（BASELINE.md / 项目指令_v7.md / 联想库设计，3 文件，已入 git）
+│   ├── docs\                   ← ★ 项目文档（BASELINE.md / 项目指令_v8.md + 4 份设计调研文档，6 文件，已入 git）
 │   ├── tools\                  ← 工具脚本（4 个 .sh/.py，已入 git）
 │   ├── legacy-remote-b2faab1-backup.zip  ← 旧版远端文件备份（已排除 *.zip，不进 git）
 │   └── 计划文档（App场景感知调研.md / 简码越级检查报告.md / 联想增强方案.md，已入 git）
@@ -225,7 +227,7 @@ D:\AutophotiaIME\
 ```
 
 **核心规则**：
-- **git 仓库根 = `dev/`**（2026-10-24 二次上移，`968a0d5`）；追踪 **161 文件 / 26M** = `space/schemas/TouchWB`（75）+ `space/patches`（76）+ `space.yaml` + `space.custom.yaml` + `docs`（3）+ `tools` 脚本（4）+ dev 顶层计划文档（3）+ `.gitignore`
+- **git 仓库根 = `dev/`**（2026-10-24 二次上移，`968a0d5`）；追踪 **161 文件 / 26M** = `space/schemas/TouchWB`（75）+ `space/patches`（76）+ `space.yaml` + `space.custom.yaml` + `docs`（6）+ `tools` 脚本（4）+ `.gitignore`
 - 日常优化只改 `dev/space/schemas/TouchWB`（方案）与 `dev/space/patches`（补丁）；`dev/space` 其余部分是手机运行时资源（themes/fonts/haptics/sounds/textflow 等），由 `.gitignore` 排除，不删不改
 - 历史延续方式：`mv space/.git dev/.git` 后重新 add 提交，**fast-forward push，从未 force push**（代价：2026-10-24 之前的 commit 路径相对 `space/`，之后相对 `dev/`，属历史断层，单人项目无影响）
 - 发布打包一律输出到 `releases/`，命名 `TouchWB_S<序号>_<日期>.zip`（README 2026-10-08 定名规则，序号为构建序号自动 +1，如 `TouchWB_S118_2026-10-21.zip`）
@@ -236,7 +238,7 @@ D:\AutophotiaIME\
 - **远端**：https://github.com/Autophotia/TouchWubi（分支 main）
 - **本地身份**：`Autophotia <Autophotia@users.noreply.github.com>`（匿名邮箱）
 - **代理**：`http.proxy/https.proxy = socks5h://127.0.0.1:1080`（已写入仓库配置，持久生效）
-- **追踪范围**：**161 个文件 / 26M** = `space/schemas/TouchWB`（75 / 18M，方案本体）+ `space/patches`（76 / 7.5M，补丁集）+ `space.yaml` + `space.custom.yaml` + `docs`（3）+ `tools` 脚本（4）+ dev 顶层计划文档（3）+ `.gitignore`
+- **追踪范围**：**161 个文件 / 26M** = `space/schemas/TouchWB`（75 / 18M，方案本体）+ `space/patches`（76 / 7.5M，补丁集）+ `space.yaml` + `space.custom.yaml` + `docs`（6 / 82KB，项目文档）+ `tools` 脚本（4）+ `.gitignore`
 - **忽略范围**（`dev/.gitignore`，路径以 git 根 `dev/` 为基准）：忽略 `build/`、`*.bin`、`log/`、`*.userdb`、`*.db-shm/-wal`、`custom_phrase.db`、`*.bak`、`*.tmp`、`*.zip`、`user.yaml`、`installation.yaml`、`**/lua/input_stats_ly_*.lua`、`sequence_*.txt`、`/tools/assoc_fixed_supplement.txt`（生成产物），以及 space 根目录手机运行时资源（`/space/emoticons/ /space/fonts/ /space/haptics/ /space/sounds/ /space/textflow/ /space/themes/ /space/tools/ /space/tutorials/ /space/plugins/ /space/resources/ /space/speeches/ /space/symbols/ /space/pasteboard/`）、`/space/README.md` `/space/LICENSE`、`/space/schemas/bim-pinyin/` `/space/schemas/bim-wubi/`
 - ⚠️ gitignore 不支持行尾注释；`core.autocrlf=false` 防 Rime 文件行尾被改写
 
@@ -254,7 +256,7 @@ D:\AutophotiaIME\
 | shadowquic | 4080 | ✅ |
 | naiveproxy | — | ❌（二进制处理连接即崩溃，不可用） |
 
-> 1080 端口六栈共用，同时只能跑一个；验证网络用 `git ls-remote`（勿用 curl）；排障先查进程存活再动配置。完整配方（含节点 IP、启动流程、窗口铁律）见 `docs/项目指令_v7.md` 第 5 节。
+> 1080 端口六栈共用，同时只能跑一个；验证网络用 `git ls-remote`（勿用 curl）；排障先查进程存活再动配置。完整配方（含节点 IP、两条启动路径、窗口铁律）见 `docs/项目指令_v8.md` 第 5 节。
 
 ### 日常更新（每次改完执行一条命令）
 
