@@ -1,5 +1,5 @@
-# TouchWB 仓库（git 根 = dev/space）忽略规则
-# 追踪：schemas/TouchWB、patches、space.yaml、space.custom.yaml、LICENSE、README.md
+# TouchWB 仓库（git 根 = dev/）忽略规则
+# 追踪：dev/docs、space/schemas/TouchWB、space/patches、dev/tools 脚本、space.yaml / space.custom.yaml、dev 顶层计划文档
 # 注意：gitignore 不支持行尾注释，注释必须独立成行
 
 # ── 编译产物（任何层级）──
@@ -21,6 +21,7 @@ custom_phrase.db
 *.bak
 *.tmp
 tmp/
+*.zip
 
 # ── 本机运行时状态（各设备不同，不入库）──
 user.yaml
@@ -31,28 +32,31 @@ installation.yaml
 **/lua/input_stats_ly_*.lua
 sequence_*.txt
 
-# ── 根目录手机目录自带文件（非方案本体）──
-/README.md
-/LICENSE
+# ── space 根目录手机自带文件（非方案本体）──
+/space/README.md
+/space/LICENSE
 
-# ── 根目录手机运行时资源（非方案本体）──
-/emoticons/
-/fonts/
-/haptics/
-/pasteboard/
-/plugins/
-/resources/
-/sounds/
-/speeches/
-/symbols/
-/textflow/
-/themes/
-/tools/
-/tutorials/
+# ── space 根目录手机运行时资源（非方案本体）──
+/space/emoticons/
+/space/fonts/
+/space/haptics/
+/space/pasteboard/
+/space/plugins/
+/space/resources/
+/space/sounds/
+/space/speeches/
+/space/symbols/
+/space/textflow/
+/space/themes/
+/space/tools/
+/space/tutorials/
 
-# ── 其他方案（非优化对象）──
-/schemas/bim-pinyin/
-/schemas/bim-wubi/
+# ── 其它方案（非优化对象）──
+/space/schemas/bim-pinyin/
+/space/schemas/bim-wubi/
+
+# ── tools 下的生成产物（脚本保留，产物不入库）──
+/tools/assoc_fixed_supplement.txt
 
 # ── 系统杂项 ──
 .DS_Store
