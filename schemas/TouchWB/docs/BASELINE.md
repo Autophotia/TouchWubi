@@ -1,8 +1,8 @@
 # TouchWB / 流萤 · 项目基线（BASELINE）
 
-> **基线版本**：v2.3（README 口径 2026-10-13）
-> **基线日期**：2026-10-21
-> **基线范围**：`D:\AutophotiaIME` 全库，865 个文件（不含 `.workbuddy`）
+> **基线版本**：v2.3（README 口径 2026-10-24）
+> **基线日期**：2026-10-21（2026-10-24 修订过时口径）
+> **基线范围**：`D:\AutophotiaIME` 全库，975 个文件（不含 `.workbuddy` 与 `.git`，2026-10-24 实测）
 > **用途**：后续所有功能拓展、优化、Bug 修复均以此文件为对照基准；每次变更在此追加「变更记录」，保证任何时候都能回答"当前版本和基线差了什么"。
 
 ---
@@ -14,9 +14,9 @@
 | 项目 | TouchWB 五笔输入法方案（Rime 内核） |
 | 上游 | 空山明月底包 → Shawx（TouchWubi）→ **Autophotia（流萤）**当前维护 |
 | 仓库 | https://github.com/Autophotia/TouchWubi |
-| README 版本 / 日期 | v2.3 / 2026-10-13 |
-| info.yaml version | 2.0 / update_time 2026-05-20（**与 README 不同步，见问题清单 D12**） |
-| 默认方案 | `ly_wubi_14`（拇指五笔 14 键，见 space.custom.yaml 与 user.yaml） |
+| README 版本 / 日期 | v2.3 / 2026-10-24 |
+| info.yaml version | 2.3 / update_time 2026-10-24 |
+| 默认方案 | `ly_wubi_14`（拇指五笔 14 键，项目默认口径；space.custom.yaml 当前实测为 `ly_wubi`，见 B-12） |
 | 默认主题 | `14key_wubi`（移动端）/ PC 用系统主题 |
 | 默认触感 | `bouncy`（旧基线为 `system`） |
 | Rime / 小狼毫 | 1.13.1 / 0.17.4 |
@@ -33,7 +33,7 @@
 | space 通用主题 | **29 套** | 32 套（-14key_wubi、-t26_microsoft、+quick） |
 | space 补丁 | 30 个（含 `_speech_*`） | +support_t14/support_t18 新建 |
 | 词库 | 五笔 3.1M / 扩展 / 拼音 4.6M / 字根拆分 1.9M | 删去了「自显字根备份版」 |
-| 智能联想库 | `assoc_fixed.txt` **12,510 首字** / 277KB；`assoc_common.txt` 8,000 常用字 | 新增（基线无） |
+| 智能联想库 | `assoc_fixed.txt` **12,510 首字** / 278KB；`assoc_common.txt` 8,000 常用字 | 新增（基线无） |
 | 预测语言库 | `predict.db` 7.5MB | 新增 |
 | 自定义短语 | `custom_phrase.db` + `.txt` | 新增 |
 | 输入法表情 | Emoji 3972 条 + 颜文字 1296 条 | tools/ 新增维护链 |
@@ -46,19 +46,23 @@
 
 ```
 D:\AutophotiaIME\
-├── dev/space/            ★ 主体工程（Rime 用户目录 + Space 资源仓，142MB）
-│   ├── space.yaml            默认入口（rime_ice_26 / bim-pinyin）
-│   ├── space.custom.yaml     ★ 实际生效配置：ly_wubi_14 + 14key_wubi
-│   ├── schemas/  TouchWB(198) bim-pinyin(73) bim-wubi(44)
-│   ├── themes/   29 套通用主题 + public
-│   ├── patches/  30 个补丁（patch方法论.md）
-│   ├── haptics/ 12 套振动 / sounds/ 6 套音效
-│   ├── textflow/ AI 文本流（翻译/润色/纠错/摘要等 16 能力）
-│   ├── tools/    表情资源维护链（python 生成器 + Unicode 快照）
-│   └── log/      app + keyboard + dufs 三类运行日志
-├── dev/*.zip          流萤分享版(37M) / 自用版(106M)，2026-09-06 快照
-├── releases/          历史发布（Rime_QM v0.12/v0.13、MIX自用版）
-├── 3安卓/ 4补丁/ 码表处理/ 新建文件夹(14字体)/ wps(无关脚本)
+├── dev/                  ★ 工作目录（space 同步副本 + 工具 + 计划文档）
+│   ├── space/             ★ 主体工程 = git 仓库根（.git 在此；从手机同步，252M）
+│   │   ├── space.yaml             默认入口（rime_ice_26 / bim-pinyin）
+│   │   ├── space.custom.yaml      ★ 实际生效配置（当前实测 ly_wubi/26key_wubi，见 B-12）
+│   │   ├── schemas/  TouchWB(★优化对象) bim-pinyin bim-wubi
+│   │   ├── patches/   补丁集（76 文件，已入 git）
+│   │   ├── themes/   29 套通用主题 + public
+│   │   ├── haptics/ sounds/ speeches/ textflow/ tools/ emoticons/ fonts/ plugins/ …
+│   │   └── log/      app + keyboard + dufs 三类运行日志
+│   ├── tools/             工具脚本（pack-release.sh / 验证脚本）
+│   ├── legacy-remote-b2faab1-backup.zip   旧远端备份（兜底）
+│   └── App场景感知可行性调研.md / 简码越级检查报告.md / 联想增强方案.md
+├── patchs/              早期补丁归档（补丁 zip + 独立补丁 + _backup + 字体包，不进 git）
+├── releases/            打包输出（TouchWB_S<序号>_<日期>.zip）
+├── wps/                 无关脚本
+├── 码表处理/             码表工具（WubiLex/mbEditer/字频表）
+└── xiangqi/             象棋（无关）
 ```
 
 ### 2.2 四套方案（继承关系）
@@ -116,17 +120,22 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 
 ---
 
-## 四、命令基线（24 条，`/h` 可查）
+## 四、命令基线（41 条，以 `lua/help_cmd.lua` GROUPS 为准，`/h` 可查）
 
 | 组 | 命令 |
 |---|---|
-| 日程 | `/jt /jq /gz /date /rq /sj /xq /dt` |
-| 统计 | `/tj /qk /ks /js /tc` |
-| 调序 | `/txql /txdc /txdr /txzq /txzj` |
-| 联想 | `/lxql /lxgc /lxzt /lxdj` |
-| 其它 | `/h` `/help` `/py`（自检）＋ 符号 `/tg /dz` 等 |
+| 日期时间 | `/rq /sj /xq /dt` |
+| 农历节气 | `/jt /jq /gz /nl` |
+| 输入统计 | `/tj /qk /ks /js /tc` |
+| 智能联想 | `/lxqk /lxql /lxzt /lxdj /lxdc /lxdr` |
+| 候选调序 | `/txqk /txzq /txzj /txdc /txdr /txtj` |
+| 符号面板 | `/tg /dz /xh /bd` |
+| 数字序号 | `/1 /2 /3 … /10`（含大写） |
+| 帮助 | `/h /help` |
 
-> 命名规则：`tx`=调序 `lx`=联想，后两位取功能拼音首字母。新增命令须沿此规则并在 `/h` 同步登记。
+> 命名规则：`tx`=调序 `lx`=联想，后两位取功能拼音首字母（`qk`=清空 `ql`=清理 `dc`=导出 `dr`=导入 `zt`=状态 `dj`=断句 `zj`=自检 `zq`=自清 `tj`=统计）。**新增/删除命令必须同步改 `lua/help_cmd.lua` 的 GROUPS 表**，否则 `/h` 帮助会漏。
+>
+> 2026-10-23 起的改名/增删：`/date`→`/nl`；新增 `/xh /bd`（符号面板）；移除 `/py`（自检）、`/lxgc`（联想衰减）、`/txql`（调序清理）；联想与调序各补 `/qk /ql /dc /dr` 全套。
 
 ---
 
@@ -142,10 +151,10 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | B-06 | P3 | LevelDB `LOCK ... Resource temporarily unavailable` 在 10-19 app 日志再度出现（8-29 亦有过） | app 日志 | 多实例/热重载抢锁；确认是否已随新部署消失 |
 | B-07 | 文档 | README 声称存在但实际缺失：`key_bindings.yaml`、`default.custom.yaml`、`weasel.custom.yaml`、`ly_wubi_ly_pinyin(_14).schema.yaml`、`修改说明.txt` | 目录核对 | 以实际为准改 README 第七节 |
 | B-08 | 文档 | 实际新增但 README 未记录：`custom_phrase.db/txt`、`predict.db`、`ly_pinyin_14.schema.yaml`、`help_cmd.lua`、`assoc_common.txt`、`installation.yaml`、各 `*.userdb` | 目录核对 | 同上 |
-| B-09 | 文档 | 联想词库三处口径互相不一致：README 正文 4430字/42809条/253KB；README 表格 v3 4325字/28661条/135.5KB；**实测 12,510 首字/277KB** | 文件实测 | 统一按实测改，并补规范：词库维护须登记实际统计 |
+| B-09 | 文档 | ✅已解决：联想词库三处口径已统一为实测 **12,510 首字 / 12,510 条 / 278KB**（原 README 正文 4430字/42809条/253KB、表格 v3 4325字/28661条/135.5KB 均已修正） | 文件实测 | 已补规范：词库维护须登记实际统计 |
 | B-10 | 代码 | 死代码：`input_stats_ly_wubi_14.lua`(994行) 与 `input_stats_ly_wubi_pinyin_14.lua`(461行) 及两个 `.bak` **无任何 schema 挂载**（统计实际走 `input_statistics.lua`） | 全库 grep | 确认可删，杜绝"改一处漏两处" |
 | B-11 | 流程 | 测试资产未随库分发：README 引用的 `本次修改-回归测试清单.md`、`tools/sandbox_s100_predictdb.py` 均不在本副本 | 全库查找 | 回归测试清单应作为受控文件纳入（建议 `dev/tests/`） |
-| B-12 | 版本 | `info.yaml` 2.0/05-20 vs README v2.3/10-13 vs space.custom 默认方案变更，三者不同步 | 文件比对 | 建立发版 checklist：README、info.yaml、space.custom 三处同步 |
+| B-12 | 版本 | ✅已解决（2026-10-24）：info.yaml 已同步 `2.3` / 2026-10-24，README v2.3 / 2026-10-24，两者一致；space.custom.yaml 当前 `schema_id=ly_wubi`/`26key_wubi` 为用户临时切换，非固定口径 | 文件比对 | 发版 checklist 已建：README、info.yaml、space.custom 三处同步 |
 | B-13 | 资产 | `14key_wubi/build/` 存在（含编译产物），`26key_wubi/` 无 build——两侧不一致；旧字体（新建文件夹 14 个 ttf）未纳入 fonts | 目录比对 | 明确 build 目录管理策略；字体确认是否还需要 |
 
 ---
@@ -182,31 +191,39 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | 2026-10-21 | **本文档上传资料库**（方案B，用户选定）：`TouchWB-BASELINE-v2.3-20261021.md` → 空间 `mIrqzsLc4wuPA4XyDa9Wrg`，供另一台设备（beyondIME）获取 | 文档分发 | 上传后 library_search 验证可检索 |
 | 2026-10-21 | **README 口径修正（9 处）+ 仓库卫生**：删除声称存在但不存在的 default.custom.yaml/key_bindings.yaml/weasel.custom.yaml；schema 错名 ly_wubi_ly_pinyin*→ly_wubi_pinyin*（4处）；联想库三处口径统一为实测 12510 首字/12510 条/278KB；predict.db 从"不要打包"移入"必需"（S117/S118 实际均含）；目录树/附录补记 installation.yaml/custom_phrase.txt/predict.db/ly_pinyin_14/help_cmd.lua/assoc_common.txt；user.yaml 与 lua/input_stats_ly_*.lua 移出 git 追踪+gitignore（运行时状态，每次手机同步产生假变更；磁盘文件保留） | 文档 + 版本控制，无功能代码改动 | 提交 `6b0dc1d` 已推送；README 与实际文件 grep 双向验证通过 |
 | 2026-10-21 | **真机日志复审 + B-01 根因实锤**：`未找到处理器: table` 9465 次 = 同文 App 对每个 table 候选上屏后执行 actionType=候选类型的后置命令、未注册处理器即报错，**文本总是先插入成功**（22/22）⇒ 定性为 App 端固有噪声，功能无损，从"待修 Bug"降级"已知噪声"；"打字慢"实锤在极点86笔画筛选路径（1261ms），TouchWB 引擎最慢 88ms；**schedule.lua 误判纠正**：generate_candidates 实定义于 `lua/lib/lunar.lua:1584`（全局函数，随包分发），用户实测 /rq /xq /dt /tj 全部命令成功 | 无代码改动 | 命令实测通过（最慢按键 79ms）；静态分析误判已以实测证据推翻并记入记忆 |
+| 2026-10-22~24 | **字典越级清理**：删 413 条越级条目（6 条 tf 伪二码：千/午/壬/竺/竿/秆 + 407 条权重 482785 批量伪二简），主词库 148222→147815 条；「行 tf」权重手动上调至 4097390 | 词典 | 越级简码全清、全码完好，排序回归通过 |
+| 2026-10-24 | **README 第 12 节输入统计口径修正**（997/1023 行）：只统计按编码上屏，排除点联想/复制/语音；头部更新日志补 2026-10-24 段；opencc 目录树修正 | 文档 | 口径与实际一致 |
+| 2026-10-24 | **info.yaml 版本同步**：2.0→2.3、update_time 2026-10-24，与 README v2.3 一致（B-12 关闭） | 版本 | README/info.yaml/space.custom 三处同步 |
+| 2026-10-24 | **git 根上移至 dev/space**（fast-forward，`fbbe016`），TouchWB 文件迁移到 schemas/TouchWB/ | 版本控制 | 历史延续，未 force push |
+| 2026-10-24 | **patches 补丁集纳入版本管理**（`51c9b5b`）：dev/space/patches 76 文件入 git；独立补丁 zip 备份至 patchs/_backup_20261023/ | 版本控制 | 追踪 154 文件/26M |
+| 2026-10-24 | **方案一（古诗文联想脚本）放弃**：assoc_common.txt 字频表错位无法识别难拆字，产出 10301 条但 71% 虚词污染；删除 chinese-poetry 语料（466M） | 决策 | 联想功能维持现状，语料已清 |
+| 2026-10-24 | **BASELINE 过时口径修订**：2.1 目录图 / 四节命令表（以 help_cmd.lua GROUPS 为准）/ 八节代理 7890→socks5h:1080 / 打包 62→61 / git 79→154 全部按实测更新 | 文档 | 本次修订 |
 
 ---
 
-## 八、Git 仓库管理（2026-10-21 重构）
+## 八、Git 仓库管理（2026-10-21 重构；2026-10-24 根上移至 `dev/space`）
 
 ### 目录约定（全库唯一权威口径）
 
 ```
 D:\AutophotiaIME\
 ├── dev\                        ← 工作目录：space 同步副本 + 计划文档 + 工具
-│   ├── BASELINE.md             ← 项目基线（本文件，不进 git）
+│   ├── space\                  ← ★ git 仓库根（.git 在此）= 手机同步的完整用户目录
+│   │   ├── schemas\TouchWB\    ← 优化对象（方案本体，75 文件，含 docs\BASELINE.md）
+│   │   ├── patches\            ← 补丁集（76 文件，已入 git）
+│   │   ├── space.yaml          ← 默认入口（入 git）
+│   │   └── space.custom.yaml   ← 实际生效配置（入 git）
 │   ├── tools\                  ← 工具脚本（pack-release.sh 等）
 │   ├── legacy-remote-b2faab1-backup.zip  ← 旧版远端文件备份（兜底，可删）
-│   └── space\                  ← 从手机应用根目录同步的完整用户目录（保上下文用，勿动结构）
-│       └── schemas\
-│           └── TouchWB\        ← ★ 优化对象 = git 仓库根（.git 在此目录内）
+│   └── 计划文档（App场景感知调研.md / 简码越级检查报告.md / 联想增强方案.md）
 ├── releases\                   ← 打包输出目录，包名 TouchWB_S<序号>_<日期>.zip
-├── 3安卓\ 4补丁\ 码表处理\ 新建文件夹\ wps\ TouchWubi\
-│                               ← 早期资产/其它用途目录，不参与 git，不用管
-└── .git-legacy-old\            ← 第一次 git 实验的归档（确认新仓库无误后可删）
+├── patchs\                     ← 早期补丁归档（补丁 zip/独立补丁/_backup/字体包，不进 git）
+└── wps\ 码表处理\ xiangqi\     ← 其它用途目录，不参与 git，不用管
 ```
 
 **核心规则**：
-- 上传 git 的内容 = `dev/space/schemas/TouchWB` 方案本体，不多不少；仓库根就在该目录，零副本、零同步
-- 日常优化只在 `dev/space/schemas/TouchWB` 里改文件；`dev/space` 其余部分是手机同步的上下文，不删不改
+- **git 仓库根 = `dev/space`**（2026-10-24 上移，非 `schemas/TouchWB`）；追踪内容 = `schemas/TouchWB`（方案本体 75 文件）+ `patches`（补丁集 76 文件）+ `space.yaml` + `space.custom.yaml` + `.gitignore`，共 **154 文件 / 26M**
+- 日常优化只改 `dev/space/schemas/TouchWB`（方案）与 `dev/space/patches`（补丁）；`dev/space` 其余部分是手机运行时资源（themes/fonts/haptics/sounds/textflow 等），由 `.gitignore` 白名单式排除，不删不改
 - 发布打包一律输出到 `releases/`，命名 `TouchWB_S<序号>_<日期>.zip`（README 2026-10-08 定名规则，序号为构建序号自动 +1，如 `TouchWB_S118_2026-10-21.zip`）
 - 新需求要建目录就在 `AutophotiaIME\` 下单建专用途文件夹，不往根目录散落文件
 
@@ -214,15 +231,31 @@ D:\AutophotiaIME\
 
 - **远端**：https://github.com/Autophotia/TouchWubi（分支 main）
 - **本地身份**：`Autophotia <Autophotia@users.noreply.github.com>`（匿名邮箱）
-- **代理**：`http.proxy/https.proxy = http://127.0.0.1:7890`（已写入仓库配置，持久生效）
-- **追踪范围**：79 个文件 / 约 19M（schema、词库、Lua、主题、icons、opencc、symbols、predict.db）
-- **忽略范围**（`.gitignore`）：`build/`、`*.bin`、`log/`、`*.userdb`、`*.db-shm/-wal`、`custom_phrase.db`、`*.bak`、`*.tmp`、系统杂项
+- **代理**：`http.proxy/https.proxy = socks5h://127.0.0.1:1080`（已写入仓库配置，持久生效）
+- **追踪范围**：**154 个文件 / 26M** = `schemas/TouchWB`（75 文件 / 18M，方案本体）+ `patches`（76 文件 / 7.5M，补丁集）+ `space.yaml` + `space.custom.yaml` + `.gitignore`
+- **忽略范围**（`.gitignore`，白名单式）：只追踪上述内容；忽略 `build/`、`*.bin`、`log/`、`*.userdb`、`*.db-shm/-wal`、`custom_phrase.db`、`*.bak`、`*.tmp`、`user.yaml`、`installation.yaml`、`**/lua/input_stats_ly_*.lua`、`sequence_*.txt`，以及根目录手机运行时资源（`/emoticons/ /fonts/ /haptics/ /sounds/ /textflow/ /themes/ /tools/ /tutorials/ /plugins/ /resources/ /speeches/ /symbols/ /pasteboard/`）、`/README.md` `/LICENSE`、`/schemas/bim-pinyin/` `/schemas/bim-wubi/`
 - ⚠️ gitignore 不支持行尾注释；`core.autocrlf=false` 防 Rime 文件行尾被改写
+
+### 代理实测（九栈，2026-10-24 固化）
+
+| 栈 | 端口 | 结果 |
+|---|---|---|
+| xray | socks 1080 / http 1081 | ✅（当前仓库用，IPv6 可用） |
+| clash | http 7890（+sslVerify=false） | ✅ |
+| singbox | 1080 | ✅ |
+| hysteria | 1080 | ✅ |
+| hysteria2 | 1080 | ✅（IPv6） |
+| juicity | 1080 | ✅ |
+| mieru | 3080 | ✅（须 ip_2 节点，服务式） |
+| shadowquic | 4080 | ✅ |
+| naiveproxy | — | ❌（二进制处理连接即崩溃，不可用） |
+
+> 1080 端口六栈共用，同时只能跑一个；验证网络用 `git ls-remote`（勿用 curl）；排障先查进程存活再动配置。完整配方（含节点 IP、启动流程、窗口铁律）见 `docs/项目指令_v7.md` 第 5 节。
 
 ### 日常更新（每次改完执行一条命令）
 
 ```bash
-cd /d/AutophotiaIME/dev/space/schemas/TouchWB
+cd /d/AutophotiaIME/dev/space
 git save "fix: 修复 xx 问题"
 # 等价于 git add -A && git commit -m "..." && git push（已配 alias）
 ```
@@ -235,22 +268,17 @@ git save "fix: 修复 xx 问题"
 bash dev/tools/pack-release.sh
 ```
 
-规则基线 = `releases/TouchWB_S117_2026-10-16.zip`（2026-10-21 对照固化），产物与参考包结构逐文件一致（62 个）：
+规则基线 = `releases/TouchWB_S117_2026-10-16.zip`（2026-10-21 对照固化），产物与参考包结构逐文件一致（**61 个**）：
 
 - **结构**：zip 内含 `TouchWB/` 根目录
-- **包含**：README/default/info/weasel/symbols/custom_phrase.txt/user_coined_ext.txt、icons/、opencc/、lua/（21 个）、6+1 schema、4 套词库、themes/14key_wubi、themes/26key_wubi、predict.db
-- **排除**：user.yaml、installation.yaml（本机安装配置）、custom_phrase.db*（自造词动态库）、*.userdb/、log/、lua/input_stats_*.lua 及 .bak（未挂载死代码）、lua/sequence_*.txt（调序数据存于用户数据目录）、themes/public/**（空间级公共资源，随 app 提供）、任何层级的 build/（编译产物）
+- **包含**：README/default/info/weasel/symbols/user_coined_ext.txt、icons/、opencc/、lua/（21 个）、6+1 schema、4 套词库、themes/14key_wubi、themes/26key_wubi、predict.db
+- **排除**：user.yaml、installation.yaml（本机安装配置）、custom_phrase.txt 及 custom_phrase.db*（自造词动态库）、*.userdb/、log/、lua/input_stats_*.lua 及 .bak（未挂载死代码）、lua/sequence_*.txt（调序数据存于用户数据目录）、themes/public/**（空间级公共资源，随 app 提供）、任何层级的 build/（编译产物）、docs/（本项目文档，不随包分发）
 - **生成**：build/default.yaml 仅含 schema_list 四项（ly_wubi_pinyin / ly_wubi_pinyin_14 / ly_wubi / ly_wubi_14），与源码中的 build/default.yaml 无关，脚本每次生成
-- 脚本内置数量校验：≠62 时告警（曾靠它抓到 themes/14key_wubi/build/ 漏排）
+- 脚本内置数量校验：≠61 时告警（曾靠它抓到 themes/14key_wubi/build/ 漏排）
 
-### 首次推送（2026-10-21 已完成）
+### 推送历史（2026-10-21 首推 → 2026-10-24 根上移）
 
-本地新历史与远端旧 main（网页上传旧版 b2faab1）不相关，已强制覆盖：
-
-```bash
-git push -u origin main --force   # 已执行：b2faab1...89d7af3 main -> main (forced update)
-```
-
-- 远端 main = 本地 main = `89d7af3`，共 79 个文件（纯方案本体）
+- 2026-10-21：本地新历史与远端旧 main（网页上传 b2faab1）不相关，force push，远端 = `89d7af3`（79 文件，纯方案本体）
+- 2026-10-24：git 根上移至 `dev/space`（fast-forward，未 force push），`patches` 补丁集纳入版本管理；当前 HEAD = `51c9b5b`，共 **154 文件 / 26M**
 - 认证方式：GitHub 设备码授权流（沙箱无 GUI，用 CentBrowser 打开 github.com/login/device 完成），令牌仅一次性使用未落盘
-- `http.sslVerify=false` 已写入仓库配置（本地代理 7890 对 TLS 做 MITM，如以后直连可删该项）
+- `http.sslVerify=false` 仍写入仓库配置（`http.proxy` 曾走 7890 MITM 时代遗留；当前 `socks5h://1080` 不做 MITM，可保留或日后清理）
