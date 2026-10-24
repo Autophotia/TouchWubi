@@ -19,7 +19,9 @@ jobs:
           path: plugins/predict
 
       - name: Install dependencies
-        run: ./action-install-linux.sh
+        run: |
+          sudo apt update
+          sudo apt install -y libboost-all-dev libgoogle-glog-dev libleveldb-dev libmarisa-dev libyaml-cpp-dev libopencc-dev libgtest-dev
 
       - name: Build build_predict tool
         run: |
