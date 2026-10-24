@@ -46,8 +46,8 @@
 
 ```
 D:\AutophotiaIME\
-├── dev/                  ★ 工作目录（space 同步副本 + 工具 + 计划文档）
-│   ├── space/             ★ 主体工程 = git 仓库根（.git 在此；从手机同步，252M）
+├── dev/                  ★ 工作目录 = git 仓库根（.git 在此；161 文件/26M）
+│   ├── space/             主体工程（从手机同步，252M；仅部分入 git）
 │   │   ├── space.yaml             默认入口（rime_ice_26 / bim-pinyin）
 │   │   ├── space.custom.yaml      ★ 实际生效配置（当前实测 ly_wubi/26key_wubi，见 B-12）
 │   │   ├── schemas/  TouchWB(★优化对象) bim-pinyin bim-wubi
@@ -55,8 +55,8 @@ D:\AutophotiaIME\
 │   │   ├── themes/   29 套通用主题 + public
 │   │   ├── haptics/ sounds/ speeches/ textflow/ tools/ emoticons/ fonts/ plugins/ …
 │   │   └── log/      app + keyboard + dufs 三类运行日志
-│   ├── docs/              ★ 项目文档（BASELINE.md / 项目指令_v7.md / 联想库设计，不进 git）
-│   ├── tools/             工具脚本（pack-release.sh / 验证脚本）
+│   ├── docs/              ★ 项目文档（BASELINE.md / 项目指令_v7.md / 联想库设计，3 文件，已入 git）
+│   ├── tools/             工具脚本（pack-release.sh / 验证脚本，4 个 .sh/.py，已入 git）
 │   ├── legacy-remote-b2faab1-backup.zip   旧远端备份（兜底）
 │   └── App场景感知可行性调研.md / 简码越级检查报告.md / 联想增强方案.md
 ├── patchs/              早期补丁归档（补丁 zip + 独立补丁 + _backup + 字体包，不进 git）
@@ -197,35 +197,37 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | 2026-10-24 | **info.yaml 版本同步**：2.0→2.3、update_time 2026-10-24，与 README v2.3 一致（B-12 关闭） | 版本 | README/info.yaml/space.custom 三处同步 |
 | 2026-10-24 | **git 根上移至 dev/space**（fast-forward，`fbbe016`），TouchWB 文件迁移到 schemas/TouchWB/ | 版本控制 | 历史延续，未 force push |
 | 2026-10-24 | **patches 补丁集纳入版本管理**（`51c9b5b`）：dev/space/patches 76 文件入 git；独立补丁 zip 备份至 patchs/_backup_20261023/ | 版本控制 | 追踪 154 文件/26M |
+| 2026-10-24 | **git 根二次上移至 `dev/`**（`968a0d5`，fast-forward）：`dev/docs`（3）+ `dev/tools` 脚本（4）+ dev 顶层计划文档（3）纳入追踪 | 版本控制 | 追踪 151→**161 文件/26M**；docs 恢复随 git 上云 |
 | 2026-10-24 | **方案一（古诗文联想脚本）放弃**：assoc_common.txt 字频表错位无法识别难拆字，产出 10301 条但 71% 虚词污染；删除 chinese-poetry 语料（466M） | 决策 | 联想功能维持现状，语料已清 |
 | 2026-10-24 | **BASELINE 过时口径修订**：2.1 目录图 / 四节命令表（以 help_cmd.lua GROUPS 为准）/ 八节代理 7890→socks5h:1080 / 打包 62→61 / git 79→154 全部按实测更新 | 文档 | 本次修订 |
 
 ---
 
-## 八、Git 仓库管理（2026-10-21 重构；2026-10-24 根上移至 `dev/space`）
+## 八、Git 仓库管理（2026-10-21 重构；2026-10-24 根上移至 `dev/`）
 
 ### 目录约定（全库唯一权威口径）
 
 ```
 D:\AutophotiaIME\
-├── dev\                        ← 工作目录：space 同步副本 + 计划文档 + 工具
-│   ├── space\                  ← ★ git 仓库根（.git 在此）= 手机同步的完整用户目录
+├── dev\                        ← ★ git 仓库根（.git 在此）= 工作目录
+│   ├── space\                  ← 手机同步的完整用户目录（勿动结构）
 │   │   ├── schemas\TouchWB\    ← 优化对象（方案本体，75 文件）
 │   │   ├── patches\            ← 补丁集（76 文件，已入 git）
 │   │   ├── space.yaml          ← 默认入口（入 git）
 │   │   └── space.custom.yaml   ← 实际生效配置（入 git）
-│   ├── docs\                   ← ★ 项目文档（BASELINE.md / 项目指令_v7.md / 联想库设计，在 git 根外，不进 git）
-│   ├── tools\                  ← 工具脚本（pack-release.sh 等）
-│   ├── legacy-remote-b2faab1-backup.zip  ← 旧版远端文件备份（兜底，可删）
-│   └── 计划文档（App场景感知调研.md / 简码越级检查报告.md / 联想增强方案.md）
+│   ├── docs\                   ← ★ 项目文档（BASELINE.md / 项目指令_v7.md / 联想库设计，3 文件，已入 git）
+│   ├── tools\                  ← 工具脚本（4 个 .sh/.py，已入 git）
+│   ├── legacy-remote-b2faab1-backup.zip  ← 旧版远端文件备份（已排除 *.zip，不进 git）
+│   └── 计划文档（App场景感知调研.md / 简码越级检查报告.md / 联想增强方案.md，已入 git）
 ├── releases\                   ← 打包输出目录，包名 TouchWB_S<序号>_<日期>.zip
 ├── patchs\                     ← 早期补丁归档（补丁 zip/独立补丁/_backup/字体包，不进 git）
 └── wps\ 码表处理\ xiangqi\     ← 其它用途目录，不参与 git，不用管
 ```
 
 **核心规则**：
-- **git 仓库根 = `dev/space`**（2026-10-24 上移，非 `schemas/TouchWB`）；追踪内容 = `schemas/TouchWB`（方案本体 75 文件）+ `patches`（补丁集 76 文件）+ `space.yaml` + `space.custom.yaml` + `.gitignore`，共 **151 文件 / 26M**
-- 日常优化只改 `dev/space/schemas/TouchWB`（方案）与 `dev/space/patches`（补丁）；`dev/space` 其余部分是手机运行时资源（themes/fonts/haptics/sounds/textflow 等），由 `.gitignore` 白名单式排除，不删不改
+- **git 仓库根 = `dev/`**（2026-10-24 二次上移，`968a0d5`）；追踪 **161 文件 / 26M** = `space/schemas/TouchWB`（75）+ `space/patches`（76）+ `space.yaml` + `space.custom.yaml` + `docs`（3）+ `tools` 脚本（4）+ dev 顶层计划文档（3）+ `.gitignore`
+- 日常优化只改 `dev/space/schemas/TouchWB`（方案）与 `dev/space/patches`（补丁）；`dev/space` 其余部分是手机运行时资源（themes/fonts/haptics/sounds/textflow 等），由 `.gitignore` 排除，不删不改
+- 历史延续方式：`mv space/.git dev/.git` 后重新 add 提交，**fast-forward push，从未 force push**（代价：2026-10-24 之前的 commit 路径相对 `space/`，之后相对 `dev/`，属历史断层，单人项目无影响）
 - 发布打包一律输出到 `releases/`，命名 `TouchWB_S<序号>_<日期>.zip`（README 2026-10-08 定名规则，序号为构建序号自动 +1，如 `TouchWB_S118_2026-10-21.zip`）
 - 新需求要建目录就在 `AutophotiaIME\` 下单建专用途文件夹，不往根目录散落文件
 
@@ -234,8 +236,8 @@ D:\AutophotiaIME\
 - **远端**：https://github.com/Autophotia/TouchWubi（分支 main）
 - **本地身份**：`Autophotia <Autophotia@users.noreply.github.com>`（匿名邮箱）
 - **代理**：`http.proxy/https.proxy = socks5h://127.0.0.1:1080`（已写入仓库配置，持久生效）
-- **追踪范围**：**151 个文件 / 26M** = `schemas/TouchWB`（75 文件 / 18M，方案本体）+ `patches`（76 文件 / 7.5M，补丁集）+ `space.yaml` + `space.custom.yaml` + `.gitignore`
-- **忽略范围**（`.gitignore`，白名单式）：只追踪上述内容；忽略 `build/`、`*.bin`、`log/`、`*.userdb`、`*.db-shm/-wal`、`custom_phrase.db`、`*.bak`、`*.tmp`、`user.yaml`、`installation.yaml`、`**/lua/input_stats_ly_*.lua`、`sequence_*.txt`，以及根目录手机运行时资源（`/emoticons/ /fonts/ /haptics/ /sounds/ /textflow/ /themes/ /tools/ /tutorials/ /plugins/ /resources/ /speeches/ /symbols/ /pasteboard/`）、`/README.md` `/LICENSE`、`/schemas/bim-pinyin/` `/schemas/bim-wubi/`
+- **追踪范围**：**161 个文件 / 26M** = `space/schemas/TouchWB`（75 / 18M，方案本体）+ `space/patches`（76 / 7.5M，补丁集）+ `space.yaml` + `space.custom.yaml` + `docs`（3）+ `tools` 脚本（4）+ dev 顶层计划文档（3）+ `.gitignore`
+- **忽略范围**（`dev/.gitignore`，路径以 git 根 `dev/` 为基准）：忽略 `build/`、`*.bin`、`log/`、`*.userdb`、`*.db-shm/-wal`、`custom_phrase.db`、`*.bak`、`*.tmp`、`*.zip`、`user.yaml`、`installation.yaml`、`**/lua/input_stats_ly_*.lua`、`sequence_*.txt`、`/tools/assoc_fixed_supplement.txt`（生成产物），以及 space 根目录手机运行时资源（`/space/emoticons/ /space/fonts/ /space/haptics/ /space/sounds/ /space/textflow/ /space/themes/ /space/tools/ /space/tutorials/ /space/plugins/ /space/resources/ /space/speeches/ /space/symbols/ /space/pasteboard/`）、`/space/README.md` `/space/LICENSE`、`/space/schemas/bim-pinyin/` `/space/schemas/bim-wubi/`
 - ⚠️ gitignore 不支持行尾注释；`core.autocrlf=false` 防 Rime 文件行尾被改写
 
 ### 代理实测（九栈，2026-10-24 固化）
@@ -257,7 +259,7 @@ D:\AutophotiaIME\
 ### 日常更新（每次改完执行一条命令）
 
 ```bash
-cd /d/AutophotiaIME/dev/space
+cd /d/AutophotiaIME/dev
 git save "fix: 修复 xx 问题"
 # 等价于 git add -A && git commit -m "..." && git push（已配 alias）
 ```
@@ -281,6 +283,8 @@ bash dev/tools/pack-release.sh
 ### 推送历史（2026-10-21 首推 → 2026-10-24 根上移）
 
 - 2026-10-21：本地新历史与远端旧 main（网页上传 b2faab1）不相关，force push，远端 = `89d7af3`（79 文件，纯方案本体）
-- 2026-10-24：git 根上移至 `dev/space`（fast-forward，未 force push），`patches` 补丁集纳入版本管理；当前 HEAD = `51c9b5b`，共 **151 文件 / 26M**
+- 2026-10-24 一次上移：git 根 → `dev/space`（fast-forward，`fbbe016`），`patches` 纳入（`51c9b5b`），追踪 154 文件
+- 2026-10-24 二次上移：git 根 → `dev/`（`968a0d5`，fast-forward，未 force push），`docs`/`tools`/计划文档纳入；当前 HEAD = `968a0d5`，共 **161 文件 / 26M**
+- ⚠️ 历史断层说明：`fbbe016` 之前的 commit 路径相对 `space/`（更早的 `89d7af3` 相对 `schemas/TouchWB/`），之后的相对 `dev/`。`git log -- <path>` 跨断层追文件需用新路径
 - 认证方式：GitHub 设备码授权流（沙箱无 GUI，用 CentBrowser 打开 github.com/login/device 完成），令牌仅一次性使用未落盘
 - `http.sslVerify=false` 仍写入仓库配置（`http.proxy` 曾走 7890 MITM 时代遗留；当前 `socks5h://1080` 不做 MITM，可保留或日后清理）
