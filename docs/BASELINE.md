@@ -15,7 +15,7 @@
 | 上游 | 空山明月底包 → Shawx（TouchWubi）→ **Autophotia（流萤）**当前维护 |
 | 仓库 | https://github.com/Autophotia/TouchWubi |
 | README 版本 / 日期 | v2.3 / 2026-10-24 |
-| info.yaml version | 2.3 / update_time 2026-10-24 |
+| info.yaml version | **"2.0" ⛔ 禁止修改**（输入法识别用；2026-10-25 事故：曾改 2.3 致导入后输入法不认，已回退）/ update_time 2026-10-24 |
 | 默认方案 | `ly_wubi_14`（拇指五笔 14 键，项目默认口径；space.custom.yaml 当前实测为 `ly_wubi`，见 B-12） |
 | 默认主题 | `14key_wubi`（移动端）/ PC 用系统主题 |
 | 默认触感 | `bouncy`（旧基线为 `system`） |
@@ -155,7 +155,8 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | B-09 | 文档 | ✅已解决：联想词库三处口径已统一为实测 **12,510 首字 / 12,510 条 / 278KB**（原 README 正文 4430字/42809条/253KB、表格 v3 4325字/28661条/135.5KB 均已修正） | 文件实测 | 已补规范：词库维护须登记实际统计 |
 | B-10 | 代码 | 死代码：`input_stats_ly_wubi_14.lua`(994行) 与 `input_stats_ly_wubi_pinyin_14.lua`(461行) 及两个 `.bak` **无任何 schema 挂载**（统计实际走 `input_statistics.lua`） | 全库 grep | 确认可删，杜绝"改一处漏两处" |
 | B-11 | 流程 | 测试资产未随库分发：README 引用的 `本次修改-回归测试清单.md`、`tools/sandbox_s100_predictdb.py` 均不在本副本 | 全库查找 | 回归测试清单应作为受控文件纳入（建议 `dev/tests/`） |
-| B-12 | 版本 | ✅已解决（2026-10-24）：info.yaml 已同步 `2.3` / 2026-10-24，README v2.3 / 2026-10-24，两者一致；space.custom.yaml 当前 `schema_id=ly_wubi`/`26key_wubi` 为用户临时切换，非固定口径 | 文件比对 | 发版 checklist 已建：README、info.yaml、space.custom 三处同步 |
+| B-12 | 版本 | ✅已解决：README v2.3 / 2026-10-24 与 BASELINE 一致；space.custom.yaml 当前 `schema_id=ly_wubi`/`26key_wubi` 为用户临时切换，非固定口径。**info.yaml version 保持 `"2.0"` 不参与同步**——见 B-14 | 文件比对 | 发版 checklist：README、space.custom.yaml、BASELINE 三处同步 |
+| B-14 | 版本 | ⛔ **`info.yaml` 的 `version: "2.0"` 禁止修改**（2026-10-25 事故）：该字段供输入法识别方案，10-24 误改为 2.3 导致方案导入输入法后不认，用户已手动回退 `"2.0"` | 用户反馈 + 文件实测 | 版本演进只记 README / BASELINE / space.custom.yaml；info.yaml 仅可改 `update_time` |
 | B-13 | 资产 | `14key_wubi/build/` 存在（含编译产物），`26key_wubi/` 无 build——两侧不一致；旧字体（新建文件夹 14 个 ttf）未纳入 fonts | 目录比对 | 明确 build 目录管理策略；字体确认是否还需要 |
 
 ---
@@ -174,7 +175,7 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
    - PC 端专属：`;` `'` 二选三选、Ctrl 调频、Emacs 键
 3. **部署三件事**：覆盖+重新部署 → 切一次方案 → 改过主题删 `themes/<t>/build/`。
 4. **新功能默认只动移动端**：主题层改动不影响 PC；改 schema/lua 必须同时评估两端。
-5. **发版同步**：README、info.yaml、space.custom.yaml、本基线，四处版本口径一致。
+5. **发版同步**：README、space.custom.yaml、本基线，**三处**版本口径一致。⛔ **不含 `info.yaml` 的 `version`**（输入法识别用，固定 `"2.0"`，改则导入后不认，见 B-14）；info.yaml 只同步 `update_time`。
 6. **日志例行检查**：每次部署后看 `log/keyboard` 与 `log/app` 的 error，新错误须入台账。
 
 ---
@@ -194,7 +195,7 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | 2026-10-21 | **真机日志复审 + B-01 根因实锤**：`未找到处理器: table` 9465 次 = 同文 App 对每个 table 候选上屏后执行 actionType=候选类型的后置命令、未注册处理器即报错，**文本总是先插入成功**（22/22）⇒ 定性为 App 端固有噪声，功能无损，从"待修 Bug"降级"已知噪声"；"打字慢"实锤在极点86笔画筛选路径（1261ms），TouchWB 引擎最慢 88ms；**schedule.lua 误判纠正**：generate_candidates 实定义于 `lua/lib/lunar.lua:1584`（全局函数，随包分发），用户实测 /rq /xq /dt /tj 全部命令成功 | 无代码改动 | 命令实测通过（最慢按键 79ms）；静态分析误判已以实测证据推翻并记入记忆 |
 | 2026-10-22~24 | **字典越级清理**：删 413 条越级条目（6 条 tf 伪二码：千/午/壬/竺/竿/秆 + 407 条权重 482785 批量伪二简），主词库 148222→147815 条；「行 tf」权重手动上调至 4097390 | 词典 | 越级简码全清、全码完好，排序回归通过 |
 | 2026-10-24 | **README 第 12 节输入统计口径修正**（997/1023 行）：只统计按编码上屏，排除点联想/复制/语音；头部更新日志补 2026-10-24 段；opencc 目录树修正 | 文档 | 口径与实际一致 |
-| 2026-10-24 | **info.yaml 版本同步**：2.0→2.3、update_time 2026-10-24，与 README v2.3 一致（B-12 关闭） | 版本 | README/info.yaml/space.custom 三处同步 |
+| 2026-10-24 | **info.yaml 版本同步**：2.0→2.3、update_time 2026-10-24，与 README v2.3 一致（B-12 关闭） | 版本 | ⚠ **此改动为错误操作，已于 10-25 回退**，见下条 B-14 |
 | 2026-10-24 | **git 根上移至 dev/space**（fast-forward，`fbbe016`），TouchWB 文件迁移到 schemas/TouchWB/ | 版本控制 | 历史延续，未 force push |
 | 2026-10-24 | **patches 补丁集纳入版本管理**（`51c9b5b`）：dev/space/patches 76 文件入 git；独立补丁 zip 备份至 patchs/_backup_20261023/ | 版本控制 | 追踪 154 文件/26M |
 | 2026-10-24 | **git 根二次上移至 `dev/`**（`968a0d5`，fast-forward）：`dev/docs`（3）+ `dev/tools` 脚本（4）+ dev 顶层计划文档（3）纳入追踪 | 版本控制 | 追踪 151→**161 文件/26M**；docs 恢复随 git 上云 |
@@ -203,6 +204,7 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | 2026-10-25 | **项目文档全部收进 `dev/docs/`**：原 `dev/` 顶层 3 份计划文档（App场景感知调研 / 简码越级检查报告 / 联想增强方案）移入 docs，共 6 份 | 版本控制 | 追踪仍 161 文件，路径变更 |
 | 2026-10-25 | **项目指令升级 v14**（误命名的 v8 已作废删除）：基线是 v13（此前只存在于会话产物目录未落盘），补 git 根 `dev/`、docs 6 份、追踪 161/26M、HEAD `d762a15`；新增「根上移既定做法」「历史断层」「换机重建三步」，沿用 v13 的 Skill 配置节与产物上传规则 | 文档 | **v14 为现行**，v13/v7 留档 |
 | 2026-10-25 | **版本纪律事故**：v8~v13 由 10-24 会话产出但只落在 `C:\Users\xoaii\WorkBuddy\2026-10-23-14-08-15\`，未写进 `dev/docs/`，导致后续按磁盘 v7 臆断版本号。已写入 v14 第 8 节第 7 条 | 流程 | 新增版本须先全盘检索确认 |
+| 2026-10-25 | **info.yaml version 回退（B-14）**：10-24 把 `version: "2.0"` 改成 2.3，导致方案导入输入法后**不被识别**；用户已手动改回 `"2.0"`（update_time 保留 2026-10-24）。该字段供输入法识别，禁止修改 | 事故回退 | 版本演进只记 README / BASELINE / space.custom.yaml；已写进 v14 铁律第 6 条 |
 
 ---
 
