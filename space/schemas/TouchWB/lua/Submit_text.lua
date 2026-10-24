@@ -194,6 +194,10 @@ local function get_char_wubi_code(char)
         if user_dir:sub(-1) ~= "/" then
             user_dir = user_dir .. "/"
         end
+        -- ★ 2026-10-25 修复：主词库已由 wubi.dict.yaml 改名为 ly_wubi.dict.yaml，
+        --   旧名找不到 ⇒ 标准编码查询失败 ⇒ 造词只能降级用用户输入的编码。
+        --   两个名字都留着（新名优先，旧名兜底），兼容任何一台还没同步字典的设备。
+        table.insert(dict_paths, user_dir .. "ly_wubi.dict.yaml")
         table.insert(dict_paths, user_dir .. "wubi.dict.yaml")
         table.insert(dict_paths, user_dir .. "wubi.extended.dict.yaml")
     end
@@ -208,6 +212,7 @@ local function get_char_wubi_code(char)
         if schema_dir:sub(-1) ~= "/" then
             schema_dir = schema_dir .. "/"
         end
+        table.insert(dict_paths, schema_dir .. "ly_wubi.dict.yaml")
         table.insert(dict_paths, schema_dir .. "wubi.dict.yaml")
         table.insert(dict_paths, schema_dir .. "wubi.extended.dict.yaml")
     end
@@ -220,6 +225,7 @@ local function get_char_wubi_code(char)
             if shared_dir:sub(-1) ~= "/" then
                 shared_dir = shared_dir .. "/"
             end
+            table.insert(dict_paths, shared_dir .. "ly_wubi.dict.yaml")
             table.insert(dict_paths, shared_dir .. "wubi.dict.yaml")
             table.insert(dict_paths, shared_dir .. "wubi.extended.dict.yaml")
         end
