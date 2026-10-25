@@ -158,6 +158,27 @@ end
 local char_code_cache = {}
 local char_code_cache_n = 0
 
+-- ★ 2026-10-25 造词专用日志（独立的低音量开关）。
+--   与上面的 klog 不同：klog 每按一个键打 1~3 条（2702 键 7567 条）必须常关；
+--   本开关只在「手动造词」这条窄路径上记录（input 含反引号 / 空格落词条 / 真正落盘），
+--   正常打字一行不打 ⇒ 可以默认开着用来抓 bug，排完再关。
+--   ⚠ 真机 log.info 只输出第一个参数，所以信息必须全部拼进第一个参数里。
+local DEBUG_COIN_LOG = true
+local function kcoin(tag, msg)
+    if not DEBUG_COIN_LOG then return end
+    pcall(function() if log and log.info then log.info("[COIN:" .. (tag or "?") .. "] " .. (msg or "")) end end)
+end
+
+-- 造词词条合法性：非空、不含字母、不少于 2 个字形
+-- （utf8.len 遇到非法序列返回 nil + 位置，直接比较会报 "attempt to compare nil"，
+--   所以整段 pcall 包住，非法输入一律判为不合格）
+local function valid_word(s)
+    if type(s) ~= "string" or s == "" then return false end
+    if s:find("%a") then return false end
+    local ok, n = pcall(utf8.len, s)
+    return ok and type(n) == "number" and n > 1
+end
+
 -- 缓存大小限制（防止无限增长）
 local MAX_CACHE_SIZE = 2000
 
@@ -365,14 +386,25 @@ function get_userphrase_path()
 end
 
 local function ensure_userphrase_file()
+    -- ★ 2026-10-25：module 加载时 userphrasepath 只在 dofile 的那一刻求值一次；
+    --   若那时机(path 尚未就绪)取到空，旧代码直接 return ⇒ 整个 session 都造不了词，
+    --   而读取方 user_coined_translator 有同样问题的自愈逻辑（见文末），两边的容错不对称。
+    --   这里补上与读取侧一致的「用到时再试一次」。
     if not userphrasepath or userphrasepath == "" then
-        return
+        userphrasepath = init_userphrase_path()
+        kcoin("ensure", "re-init path -> [" .. tostring(userphrasepath) .. "]")
+        if not userphrasepath or userphrasepath == "" then
+            kcoin("ensure", "FAIL: user_data_dir 仍为空，本轮无法造词")
+            return
+        end
     end
-    
+
     local f = io.open(userphrasepath, "r")
     if not f then
         f = io.open(userphrasepath, "w")
         if f then
+            -- 注意：保持原来的 3 行注释头，不额外写入换行的初始内容，
+            -- 这样 fileappendtext 追加时不会出现多余空行。
             f:write("# 自造词文件\n")
             f:write("# 格式：词条<Tab>编码\n")
             f:write("# 即时生效，无需重新部署\n")
@@ -446,18 +478,42 @@ function fileappendtext(filepath, context, input, env)
     
     local len = utf8.len(context)
     local clean_input = ""
-    
+
+    if not filepath or filepath == "" then
+        kcoin("write", "ABORT: filepath 为空，写不进去 context=[" .. context .. "]")
+        return
+    end
+
     -- 统一使用 generate_standard_code 从字典查询标准五笔编码
     -- 这种方式无论26键还是14键都更加可靠，不依赖用户输入的编码
     clean_input = generate_standard_code(context)
-    
+
     -- 如果字典查询失败（可能是生僻字），降级使用用户输入的编码
     if not clean_input or clean_input == "" then
         clean_input = splitinput(input, len)
+        if clean_input and clean_input ~= "" then
+            kcoin("code", "DEGRADED: 字典查不到 [" .. context .. "]，改用用户输入 input=[" ..
+                  tostring(input) .. "] -> " .. clean_input)
+        end
+    else
+        kcoin("code", "standard [" .. context .. "] -> " .. clean_input .. " (len=" .. #clean_input .. ")")
     end
-    
+
     if not clean_input or clean_input == "" then
+        kcoin("write", "ABORT: 编码为空 context=[" .. context .. "]")
         return
+    end
+
+    -- ★ 兜底：#clean_input 不足 4 位（多数词 usr:#=4）通常意味着字典里
+    --   某个字压根查不到编码 ⇒ 这种词存进去也打不出来。此时优先退回用户输入的全串试试。
+    if #clean_input < 4 then
+        local alt = splitinput(input, len)
+        if alt and alt ~= "" and #alt > #clean_input then
+            kcoin("code", "SHORT " .. #clean_input .. " 位，改用 " .. #alt .. " 位输入码 " .. alt)
+            clean_input = alt
+        else
+            kcoin("code", "SHORT " .. #clean_input .. " 位且无更好输入码，仍写入：" .. clean_input)
+        end
     end
     
     -- 检查是否已存在，避免重复写入相同词条和编码
@@ -481,7 +537,13 @@ function fileappendtext(filepath, context, input, env)
             f:close()
             -- ★ 文件被我们改写了 ⇒ 自造词缓存立即失效（见 user_coined_translator）
             _uc_cache = nil
+            kcoin("write", "OK [" .. context .. "] code=" .. clean_input .. " -> " .. tostring(filepath))
+        else
+            -- 旧代码这里静默失败：写不进去完全没有任何痕迹，看起来就是「造不了词」
+            kcoin("write", "FAIL: io.open(filepath,'a') 返回 nil，path=" .. tostring(filepath))
         end
+    else
+        kcoin("write", "SKIP: 已存在完全相同条目 " .. normalized)
     end
 end
 
@@ -591,11 +653,39 @@ local function commit_text_processor(key, env)
     local function update_manual_userphrase()
         if input_text and input_text:find("`") then
             local commit_text = context:get_commit_text() or ""
-            if commit_text ~= "" and not commit_text:find("%a") and utf8.len(commit_text) > 1 then
+            kcoin("probe", "step=commit_text input=[" .. input_text .. "] has_menu=" ..
+                  tostring(context:has_menu()) .. " commit_text=[" .. commit_text .. "]")
+
+            if not valid_word(commit_text) then
+                -- ★ 2026-10-25 兜底：commit_text 拿不到合规词条时，
+                --   改从「当前菜单选中的候选」取值（拿不到选中项就退回首候选）。
+                --   只在原本会判失败的情况下才生效，已成功的路径完全不变。
+                local fb, why = nil, ""
+                pcall(function()
+                    if not context:has_menu() then why = "no_menu"; return end
+                    local n = 0
+                    if segment then
+                        n = segment.menu:candidate_count()
+                        fb = segment:get_selected_candidate()
+                    end
+                    if not fb then fb = context:get_selected_candidate() end
+                    if not fb and n > 0 and segment then fb = segment:get_candidate_at(0) end
+                    if not fb then why = why .. " no_candidate(n=" .. n .. ")" end
+                end)
+                if fb and fb.text and valid_word(fb.text) then
+                    commit_text = fb.text
+                    kcoin("probe", "step=fallback_candidate -> [" .. commit_text .. "]")
+                else
+                    kcoin("probe", "step=fallback_failed " .. why)
+                end
+            end
+
+            if valid_word(commit_text) then
                 env.userphrase = commit_text
                 env.inputtext = input_text   -- 使用原始输入，保留反引号
                 return
             end
+            kcoin("probe", "step=REJECT: 无合规词条 input=[" .. input_text .. "]")
         end
         env.userphrase = ""
         env.inputtext = ""
@@ -639,6 +729,13 @@ local function commit_text_processor(key, env)
     end
 
     -- 空格键触发手动造词保存
+    if is_space_key then
+        -- ★ 诊断：空格有没有真走到这一步？（前面的 processor 可能已把它吞掉）
+        kcoin("space", "到达 Submit_text input=[" .. tostring(input_text) ..
+              "] has_backtick=" .. tostring(input_text and input_text:find("`") ~= nil) ..
+              "] has_menu=" .. tostring(context:has_menu()) ..
+              " userphrase=[" .. tostring(env.userphrase) .. "]")
+    end
     if is_space_key and handle_manual_coin() then
         return 1
     end
