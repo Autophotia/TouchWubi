@@ -108,7 +108,7 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 ### 2.5 数据文件与平台差异
 
 - **用户数据（LevelDB）**：`lua/sequence_<方案>`（调频）、`lua/assoc_<方案>`（联想）、`lua/tips`、`easy_en`、`assoc_easy_en`、`rime_ice.userdb`
-- **造词/短语明文**：`user_coined_ext.txt`（手机↔PC 共享）、`custom_phrase.txt`
+- **造词/短语明文（运行时自动生成，不进 git 不进包）**：`user_coined_ext.txt`（`Submit_text.lua` 首次造词时自动创建）、`custom_phrase.txt`
 - **平台差异**：主题（theme.yaml）仅移动端；schema/lua/词典两端共用；联想默认仅移动端（`assoc_pc`：仅移动/双端）
 - **部署链路**：PC 改 `dev/space` → 打包 → 手机 dufs(局域网 WebDAV, 192.168.124.x) 拉取热更新（真机为鸿蒙）
 - **部署三件事（缺一即"没生效"）**：① 覆盖文件并重新部署 ② **切换一次方案**（Lua 与缓存重建）③ 改过主题则删 `themes/<t>/build/` 再切方案（build 在就不重编译）
@@ -277,13 +277,13 @@ git save "fix: 修复 xx 问题"
 bash dev/tools/pack-release.sh
 ```
 
-规则基线 = `releases/TouchWB_S117_2026-10-16.zip`（2026-10-21 对照固化），产物与参考包结构逐文件一致（**61 个**）：
+规则基线 = `releases/TouchWB_S117_2026-10-16.zip`（2026-10-21 对照固化），产物与参考包结构逐文件一致（**60 个**）：
 
 - **结构**：zip 内含 `TouchWB/` 根目录
-- **包含**：README/default/info/weasel/symbols/user_coined_ext.txt、icons/、opencc/、lua/（21 个）、6+1 schema、4 套词库、themes/14key_wubi、themes/26key_wubi、predict.db
-- **排除**：user.yaml、installation.yaml（本机安装配置）、custom_phrase.txt 及 custom_phrase.db*（自造词动态库）、*.userdb/、log/、lua/input_stats_*.lua 及 .bak（未挂载死代码）、lua/sequence_*.txt（调序数据存于用户数据目录）、themes/public/**（空间级公共资源，随 app 提供）、任何层级的 build/（编译产物）
+- **包含**：README/default/info/weasel/symbols、icons/、opencc/、lua/（21 个）、6+1 schema、4 套词库、themes/14key_wubi、themes/26key_wubi、predict.db
+- **排除**：user.yaml、installation.yaml（本机安装配置）、custom_phrase.txt 及 custom_phrase.db*（自造词动态库）、user_coined_ext.txt（运行时自动生成）、*.userdb/、log/、lua/input_stats_*.lua 及 .bak（未挂载死代码）、lua/sequence_*.txt（调序数据存于用户数据目录）、themes/public/**（空间级公共资源，随 app 提供）、任何层级的 build/（编译产物）
 - **生成**：build/default.yaml 仅含 schema_list 四项（ly_wubi_pinyin / ly_wubi_pinyin_14 / ly_wubi / ly_wubi_14），与源码中的 build/default.yaml 无关，脚本每次生成
-- 脚本内置数量校验：≠61 时告警（曾靠它抓到 themes/14key_wubi/build/ 漏排）
+- 脚本内置数量校验：≠60 时告警（曾靠它抓到 themes/14key_wubi/build/ 漏排）
 
 ### 推送历史（2026-10-21 首推 → 2026-10-24 根上移）
 
