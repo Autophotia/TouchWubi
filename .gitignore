@@ -17,6 +17,10 @@ log/
 *.db-wal
 custom_phrase.db
 
+# ── 运行时自生成文件（非方案源码，不入库；注意用精确路径，勿误伤 patches 里的同名补丁资源）──
+/space/schemas/TouchWB/custom_phrase.txt
+/space/schemas/TouchWB/user_coined_ext.txt
+
 # ── 备份与临时文件 ──
 *.bak
 *.tmp
