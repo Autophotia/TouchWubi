@@ -59,7 +59,7 @@ D:\AutophotiaIME\
 │   ├── tools/             工具脚本（pack-release.sh / 验证脚本，4 个 .sh/.py，已入 git）
 │   ├── legacy-remote-b2faab1-backup.zip   旧远端备份（兜底）
 │   └── App场景感知可行性调研.md / 简码越级检查报告.md / 联想增强方案.md
-├── patchs/              早期补丁归档（补丁 zip + 独立补丁 + _backup + 字体包，不进 git）
+├── patches/             早期补丁归档（补丁 zip + 独立补丁 + _backup + 字体包，不进 git）
 ├── releases/            打包输出（TouchWB_S<序号>_<日期>.zip）
 ├── wps/                 无关脚本
 ├── 码表处理/             码表工具（WubiLex/mbEditer/字频表）
@@ -209,7 +209,7 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | 2026-10-24 | **README 第 12 节输入统计口径修正**（997/1023 行）：只统计按编码上屏，排除点联想/复制/语音；头部更新日志补 2026-10-24 段；opencc 目录树修正 | 文档 | 口径与实际一致 |
 | 2026-10-24 | **info.yaml 版本同步**：2.0→2.3、update_time 2026-10-24，与 README v2.3 一致（B-12 关闭） | 版本 | ⚠ **此改动为错误操作，已于 10-25 回退**，见下条 B-14 |
 | 2026-10-24 | **git 根上移至 dev/space**（fast-forward，`fbbe016`），TouchWB 文件迁移到 schemas/TouchWB/ | 版本控制 | 历史延续，未 force push |
-| 2026-10-24 | **patches 补丁集纳入版本管理**（`51c9b5b`）：dev/space/patches 76 文件入 git；独立补丁 zip 备份至 patchs/_backup_20261023/ | 版本控制 | 追踪 154 文件/26M |
+| 2026-10-24 | **patches 补丁集纳入版本管理**（`51c9b5b`）：dev/space/patches 76 文件入 git；独立补丁 zip 备份至 patches/_backup_20261023/ | 版本控制 | 追踪 154 文件/26M |
 | 2026-10-24 | **git 根二次上移至 `dev/`**（`968a0d5`，fast-forward）：`dev/docs`（3）+ `dev/tools` 脚本（4）+ dev 顶层计划文档（3）纳入追踪 | 版本控制 | 追踪 151→**161 文件/26M**；docs 恢复随 git 上云 |
 | 2026-10-24 | **方案一（古诗文联想脚本）放弃**：assoc_common.txt 字频表错位无法识别难拆字，产出 10301 条但 71% 虚词污染；删除 chinese-poetry 语料（466M） | 决策 | 联想功能维持现状，语料已清 |
 | 2026-10-24 | **BASELINE 过时口径修订**：2.1 目录图 / 四节命令表（以 help_cmd.lua GROUPS 为准）/ 八节代理 7890→socks5h:1080 / 打包 62→61 / git 79→154 全部按实测更新 | 文档 | 本次修订 |
@@ -240,7 +240,7 @@ D:\AutophotiaIME\
 │   ├── legacy-remote-b2faab1-backup.zip  ← 旧版远端文件备份（已排除 *.zip，不进 git）
 │   └── 计划文档（App场景感知调研.md / 简码越级检查报告.md / 联想增强方案.md，已入 git）
 ├── releases\                   ← 打包输出目录，包名 TouchWB_S<序号>_<日期>.zip
-├── patchs\                     ← 早期补丁归档（补丁 zip/独立补丁/_backup/字体包，不进 git）
+├── patches\                    ← 早期补丁归档（补丁 zip/独立补丁/_backup/字体包，不进 git）
 └── wps\ 码表处理\ xiangqi\     ← 其它用途目录，不参与 git，不用管
 ```
 
