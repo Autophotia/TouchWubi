@@ -1655,10 +1655,20 @@ end
 -- -------------------------------------------------------------------
 local P = {}
 
+-- ★ 前向声明：import_assoc 定义在本文件靠后的导出区（约 2865 行），
+--   但 P.init 需要在引擎加载时调它做「启动自动导入」。先声明 local，
+--   函数体稍后赋值，P.init 里的引用才能正确绑定为 upvalue（否则会编译成全局 nil）。
+local import_assoc
+
 function P.init(env)
     _sid = env and env.engine and env.engine.schema and env.engine.schema.schema_id
     pcall(probe_init, env)
-    get_db(_sid)
+    local db = get_db(_sid)
+    -- ★ B（2026-10-27）：启动自动导入，补齐联想与调序的不对称。
+    --   调序 P.init 已 import_from_file；联想此前只有手动 /lxdr。此处对齐：
+    --   启动时若存在 /lxdc 导出的备份，自动合并进当前库（max 合并，幂等）。
+    --   无备份 / 失败 / schema 不符一律静默降级，不打断输入。
+    pcall(import_assoc, db, _sid)
     --   ★ S71：把 assoc_mode 的**原始返回值**和**解读出的语义**一起打出来。
     --     这两行对照着看，就能一眼确认 S71 的档位反转是否真的修好了：
     --       raw=false ⇒ 语义应为「我们的联想」（占位符路）
@@ -2862,7 +2872,9 @@ end
 
 -- 导入：返回 (ok, imported, skipped, err)
 --   imported = 实际写入/提升的条数；skipped = 格式损坏跳过的行数
-local function import_assoc(db, sid)
+-- ★ 注意：这是「前向声明 local import_assoc」（见 P.init 前）的赋值点。
+--   不要改回 local function，否则 P.init 里的引用仍是 nil。
+import_assoc = function(db, sid)
     if not sid then return false, 0, 0, "no_sid" end
     if not db or not db:loaded() then return false, 0, 0, "no_db" end
     local path = assoc_export_path(sid)

@@ -3,7 +3,7 @@
 # 用法：bash dev/tools/pack-release.sh
 # 输出：releases/TouchWB_S<序号>_<日期>.zip（序号取已有最大 S 编号 +1，如 S117 → S118）
 #
-# 打包规则（对照参考包逐条固化，共 60 个文件）：
+# 打包规则（对照参考包逐条固化，共 61 个文件）：
 #   结构：zip 内含 TouchWB/ 根目录
 #   包含：README/default/info/weasel/symbols、
 #         icons/、opencc/、lua/（21个）、6+1 schema、4 套词库、
@@ -107,8 +107,8 @@ with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as z:
     total += len(BUILD_DEFAULT.encode('utf-8'))
 
 print('打包完成：%d 个文件（含生成的 build/default.yaml），压缩前 %.1f MB' % (count, total / 1048576))
-if count != 60:
-    print('⚠️ 文件数与参考包基线（60）不一致，请核对排除规则或新增资产')
+if count != 61:
+    print('⚠️ 文件数与参考包基线（61）不一致，请核对排除规则或新增资产')
 PYEOF
 
 size="$(du -h "$target" | cut -f1)"

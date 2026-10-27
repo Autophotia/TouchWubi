@@ -146,6 +146,7 @@ engine:
     # Lua处理器：自造词记录处理器（监控并记录用户自造词）
     - lua_processor@*smart_assoc*P     # 智能联想：★ 必须在 Submit_text / punctuator 之前
     - lua_processor@*Submit_text
+    - lua_processor@*user_coined_cmd*P    # 自造词管理：/zcscN 接管序号数字键
     # Lua处理器：超级提示处理器
     - lua_processor@*super_tips
     # Lua处理器：超序列前移处理器（Super Sequence Processor）
@@ -175,6 +176,7 @@ engine:
     - lua_filter@*super_sequence*S         # 候选字词按词频自动排序（基于 quality 降序）
     - lua_filter@*super_sequence*F         # 候选字词快捷键手动调序（移动设备send数字调序）
     - lua_filter@*smart_assoc*F         # 智能联想：/lxqk 清空 /lxzt 状态（放 S+F 之后）
+    - lua_filter@*user_coined_cmd*F       # 自造词管理：/zcscN 删除 /zccx 撤销 /zcqk 清空
     - lua_filter@*wubi_pinyin_filter       # 重码筛选（第五码拼音首字母筛选），放在S+F之后，在已排序候选基础上筛选
     # 简化器：执行通用简化和过滤操作
     - simplifier
@@ -207,6 +209,7 @@ engine:
     - lua_translator@*smart_assoc*T     # 智能联想：在 predictor 空段上吐联想候选（放最前）
     - lua_translator@*schedule
     - lua_translator@*help_cmd                 # 帮助命令（/h、/help，列出全部命令）
+    - lua_translator@*user_coined_cmd*T   # 自造词管理：/zctj 统计与倒序列表
     # 标点翻译器：翻译标点符号
     - punct_translator
     # 码表翻译器
@@ -391,6 +394,8 @@ recognizer:
     mkst: "^[a-y]*`[a-y`]*$"
     # 标点符号模式：匹配以/开头的数字或字母（用于调取symbol.yaml中的符号）
     punct: "^/([0-9]0?|[A-Za-z]+)$"
+    # 自造词管理命令：兜 /zcsc3 这类「字母+数字」串（纯字母命令仍走 punct）
+    coin_cmd: "^/zc[a-z]+[0-9]+$"
     # 临时拼音功能：输入z键引导拼音反查（拼音翻译器自动切分音节）
     reverse_lookup: "^z[a-z]*$"
 # 按键绑定配置（定义特殊按键和快捷键功能）

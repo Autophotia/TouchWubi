@@ -888,4 +888,9 @@ end
 
 rawset(_G, "user_coined_translator", user_coined_translator)
 
+-- ★ 2026-10-27：给外部模块用的缓存失效钩子（供 lua/user_coined_cmd.lua 的
+--   删词命令调用）。_uc_cache 是本文件的 upvalue，外部模块够不着；删完词若是
+--   清不掉它，user_coined_translator 还会把已删除的词吐出来，最多滞后一个 TTL（60 秒）。
+rawset(_G, "UserCoined_InvalidateCache", function() _uc_cache = nil end)
+
 return commit_text_processor

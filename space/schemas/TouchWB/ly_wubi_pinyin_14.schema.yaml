@@ -134,6 +134,7 @@ engine:
     - ascii_composer
     - lua_processor@*smart_assoc*P     # 智能联想：★ 必须在 Submit_text / punctuator 之前
     - lua_processor@*Submit_text
+    - lua_processor@*user_coined_cmd*P    # 自造词管理：/zcscN 接管序号数字键
     - lua_processor@*super_tips
     - lua_processor@*super_sequence*P
     - lua_processor@*pair_punct*processor
@@ -149,6 +150,7 @@ engine:
     - lua_filter@*super_sequence*S         # 候选字词按词频自动排序（基于 quality 降序）
     - lua_filter@*super_sequence*F         # 候选字词快捷键手动调序（移动设备send数字调序）
     - lua_filter@*smart_assoc*F         # 智能联想：/lxqk 清空 /lxzt 状态（放 S+F 之后）
+    - lua_filter@*user_coined_cmd*F       # 自造词管理：/zcscN 删除 /zccx 撤销 /zcqk 清空
     - lua_filter@*wubi_pinyin_filter       # 重码筛选（第五码拼音首字母筛选），放在S+F之后，在已排序候选基础上筛选
     - simplifier
     - simplifier@es_conversion
@@ -166,6 +168,7 @@ engine:
     - lua_translator@*smart_assoc*T     # 智能联想：在 predictor 空段上吐联想候选（放最前）
     - lua_translator@*schedule                 # 日程命令（/jt 等）- 放在最前面确保优先级最高
     - lua_translator@*help_cmd                 # 帮助命令（/h、/help，列出全部命令）
+    - lua_translator@*user_coined_cmd*T   # 自造词管理：/zctj 统计与倒序列表
     - punct_translator
     - table_translator@pinyin_direct             # 拼音直查：候选流最前面的拼音候选（见文末 pinyin_direct 段）
     - table_translator

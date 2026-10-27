@@ -84,26 +84,29 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 翻译器（固定顺序）：
 `predict_translator → smart_assoc*T → schedule → help_cmd → punct_translator → table_translator → user_coined → fixed → mkst → script_translator@wubi_prefix → reverse_lookup → calculator → email_suffix → input_statistics`
 
-### 2.4 15 个 Lua 模块基线
+### 2.4 Lua 模块基线（14 个 + lib 5 库）
+
+行数按 2026-10-27 实测（`wc -l`），与旧表有出入的以实测为准。
 
 | 模块 | 行数 | 职责 | 挂载 |
 |---|---|---|---|
-| smart_assoc | 2985 | 智能联想（历史记忆+逐级联想+衰减淘汰） | 四方案 |
-| super_sequence | 2141 | 手工调频/自动调频/自动排序 | 四方案 |
-| input_statistics | 1089 | 输入统计（/tj /ks /js） | 四方案 |
-| wubi_pinyin_filter | 1029 | 14键双键模糊+第五码拼音筛选+分层预测 | 四方案 |
-| new_spelling | 900 | 字根拆分/拼音/编码注解 | 四方案 |
-| Submit_text | 785 | 造词/快捷上屏/编码查询 | 四方案 |
+| smart_assoc | 3186 | 智能联想（历史记忆+逐级联想+衰减淘汰） | 四方案 |
+| super_sequence | 2140 | 手工调频/自动调频/自动排序 | 四方案 |
+| input_statistics | 1017 | 输入统计（/tj /ks /js） | 四方案 |
+| wubi_pinyin_filter | 1028 | 14键双键模糊+第五码拼音筛选+分层预测 | 四方案 |
+| new_spelling | 899 | 字根拆分/拼音/编码注解 | 四方案 |
+| Submit_text | 895 | 造词/快捷上屏/编码查询 | 四方案 |
 | calculator | 667 | 计算器+大/小写金额 | 四方案 |
 | pair_punct | 599 | 智能对标点 | 26键 |
 | schedule | 521 | 日程农历（/jt /jq /rq …） | 四方案 |
 | super_tips | 369 | 超级提示 | 四方案 |
-| calc_symbol_processor | 217 | 计算器符号处理器 | 14键 |
-| email_suffix_translator | 91 | 邮箱后缀补全 | 四方案 |
-| help_cmd | 51 | `/h` 命令帮助 | 四方案 |
+| calc_symbol_processor | 217 | 计算器符号处理器（算式按键接管） | 14键 |
+| email_suffix_translator | 90 | 邮箱后缀补全 | 四方案 |
+| user_coined_cmd | 606 | 自造词管理命令：列表/删序号(2位)/撤销/清空 + 从备份导入 | 四方案（2026-10-27 新增） |
+| help_cmd | 55 | `/h` 命令帮助 | 四方案 |
 | lib/（basic bit log lunar userdb） | 2053 | 基础库（农历 1666 行在内） | 依赖 |
 
-> ⚠ 深度耦合：`wubi_pinyin_filter` 与 `Submit_text` 依赖 `new_spelling` 的注释格式；单独带走任何 .lua 均不可用（README 9.5 节）。
+> ⚠ 深度耦合：`wubi_pinyin_filter` 与 `Submit_text` 依赖 `new_spelling` 的注释格式；`user_coined_cmd` 依赖 `Submit_text` 暴露的 `get_userphrase_path()` 与 `UserCoined_InvalidateCache()` 钩子（2026-10-27 为删词新增）；单独带走任何 .lua 均不可用（README 9.5 节）。
 
 ### 2.5 数据文件与平台差异
 
@@ -121,7 +124,7 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 
 ---
 
-## 四、命令基线（41 条，以 `lua/help_cmd.lua` GROUPS 为准，`/h` 可查）
+## 四、命令基线（46 条，以 `lua/help_cmd.lua` GROUPS 为准，`/h` 可查）
 
 | 组 | 命令 |
 |---|---|
@@ -130,11 +133,20 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | 输入统计 | `/tj /qk /ks /js /tc` |
 | 智能联想 | `/lxqk /lxql /lxzt /lxdj /lxdc /lxdr` |
 | 候选调序 | `/txqk /txzq /txzj /txdc /txdr /txtj` |
+| 自造词 | `/zctj /zcscNN /zccx /zcqk /zcdr` |
 | 符号面板 | `/tg /dz /xh /bd` |
 | 数字序号 | `/1 /2 /3 … /10`（含大写） |
 | 帮助 | `/h /help` |
 
-> 命名规则：`tx`=调序 `lx`=联想，后两位取功能拼音首字母（`qk`=清空 `ql`=清理 `dc`=导出 `dr`=导入 `zt`=状态 `dj`=断句 `zj`=自检 `zq`=自清 `tj`=统计）。**新增/删除命令必须同步改 `lua/help_cmd.lua` 的 GROUPS 表**，否则 `/h` 帮助会漏。
+> 命名规则：`tx`=调序 `lx`=联想 `zc`=自造词，后两位取功能拼音首字母（`qk`=清空 `ql`=清理 `dc`=导出 `dr`=导入 `zt`=状态 `dj`=断句 `zj`=自检 `zq`=自清 `tj`=统计 `sc`=删除 `cx`=撤销）。**自造词 `/zcdr`＝从备份导入，与 `/lxdr`（联想导入）、`/txdr`（调序导入）同族**。
+>
+> ★ 自造词的「备份」不单设命令，与 `/zctj` 合用：有备份时摘要显示「有备份：共 N 条」。备份保险是**合并去重**——`/zcqk` 清空前把当前库并进备份（`user_coined_cmd.lua` 的 `backup_lines`），只追加备份里没有的词，备份永远是「历史所有造词的并集」、只增不减。数字不在 `speller.alphabet` 里，`/zcscNN` 的序号靠 `user_coined_cmd*P` 在 `/zcsc` 前缀下 `push_input` 接管；依赖两份主方案的 `coin_cmd: "^/zc[a-z]+[0-9]+$"` pattern。
+>
+> ★ `/zcsc` 序号**固定 2 位**（`01`~`99`）：`/zcsc` 输入即显示列表（与 `/zctj` 同款倒序，序号 2 位补零），`/zcsc0` 中间态保持列表，输满 2 位（`/zcsc01`）才删除。定长是为消除「输完即删」模型下变长序号的定界歧义（输 `1` 会被当成删第 1 条，永远没机会输 `12`）；`/zcsc00` 提示「序号从 01 开始」，越界提示「没有第 NN 条」。
+>
+> **新增/删除命令必须同步改 `lua/help_cmd.lua` 的 GROUPS 表**，否则 `/h` 帮助会漏。
+>
+> ⚠ `/zcscNN` 的 NN 要用户现打数字：因 `speller.alphabet` 不含数字，由 `user_coined_cmd*P` 在 `/zcsc` 前缀下用 `push_input` 接管数字键（与 `calc_symbol_processor` 接管算式符号同一套路），且只在前 2 位内接管、满 2 位即不再接管（防止 3 位）。若真机上数字被 App 层截走，兜底办法是把 `0-9` 加进 alphabet —— 但要评估 PC 端「数字选候选」的冲突，不优先。
 >
 > 2026-10-23 起的改名/增删：`/date`→`/nl`；新增 `/xh /bd`（符号面板）；移除 `/py`（自检）、`/lxgc`（联想衰减）、`/txql`（调序清理）；联想与调序各补 `/qk /ql /dc /dr` 全套。
 
@@ -204,6 +216,9 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | 2026-10-25 | **项目文档全部收进 `dev/docs/`**：原 `dev/` 顶层 3 份计划文档（App场景感知调研 / 简码越级检查报告 / 联想增强方案）移入 docs，共 6 份 | 版本控制 | 追踪仍 161 文件，路径变更 |
 | 2026-10-25 | **项目指令升级 v14**（误命名的 v8 已作废删除）：基线是 v13（此前只存在于会话产物目录未落盘），补 git 根 `dev/`、docs 6 份、追踪 161/26M、HEAD `d762a15`；新增「根上移既定做法」「历史断层」「换机重建三步」，沿用 v13 的 Skill 配置节与产物上传规则 | 文档 | **v14 为现行**，v13/v7 留档 |
 | 2026-10-25 | **版本纪律事故**：v8~v13 由 10-24 会话产出但只落在 `C:\Users\xoaii\WorkBuddy\2026-10-23-14-08-15\`，未写进 `dev/docs/`，导致后续按磁盘 v7 臆断版本号。已写入 v14 第 8 节第 7 条 | 流程 | 新增版本须先全盘检索确认 |
+| 2026-10-27 | **自造词删词 + 备份导入**：新增 `lua/user_coined_cmd.lua`（571 行，P/T/F 三件式），五命令 `/zctj` 统计（摘要含备份条数）+倒序列表、`/zcscN` 按序号删、`/zccx` 撤销末条、`/zcqk` 清空（自动备份，合并去重）、`/zcdr` 从备份合并导入（只补缺，与 `/lxdr`/`/txdr` 同族）。Submit_text.lua 补 `UserCoined_InvalidateCache` 钩子；4 份 schema 挂载 + 2 份主方案加 `coin_cmd` recognizer pattern | 新功能 | 命令 41→46 条；沙盒 16 用例全通过；**待真机验证数字键接管与 /zcdr 恢复** |
+| 2026-10-27 | **备份设计（同上功能，口径定案）**：备份不单设命令，与 `/zctj` 合用显示「有备份：共 N 条」；单份 `.bak`；备份文件首行写 `# 备份时间：…`（Lua 无 lstat 取不到文件时间）；`/zcdr` 恢复按正序写回，保持「末行=最新」的序号语义 | 设计调整 | 覆盖同日较早的 7 条 `zcbf` 族方案 |
+| 2026-10-27 | **删词序号固定 2 位**：`/zcsc` 改为输入即显示词条列表（带 2 位序号 `01`~`99`），输满 2 位才删；弃变长 `/zcscN`——「输完即删」模型下变长序号有定界歧义（输 `1` 即被当删第 1 条，无机会输 `12`）。P 数字接管限 2 位上限；`/zcsc00` 提示「序号从 01 开始」；`/zctj` 列表序号同步 2 位补零。模块 571→606 行 | 交互调整 | 沙盒 22 用例全通过 |
 | 2026-10-25 | **info.yaml version 回退（B-14）**：10-24 把 `version: "2.0"` 改成 2.3，导致方案导入输入法后**不被识别**；用户已手动改回 `"2.0"`（update_time 保留 2026-10-24）。该字段供输入法识别，禁止修改 | 事故回退 | 版本演进只记 README / BASELINE / space.custom.yaml；已写进 v14 铁律第 6 条 |
 
 ---
@@ -281,7 +296,7 @@ bash dev/tools/pack-release.sh
 
 - **结构**：zip 内含 `TouchWB/` 根目录
 - **包含**：README/default/info/weasel/symbols、icons/、opencc/、lua/（21 个）、6+1 schema、4 套词库、themes/14key_wubi、themes/26key_wubi、predict.db
-- **排除**：user.yaml、installation.yaml（本机安装配置）、custom_phrase.txt 及 custom_phrase.db*（自造词动态库）、user_coined_ext.txt（运行时自动生成）、*.userdb/、log/、lua/input_stats_*.lua 及 .bak（未挂载死代码）、lua/sequence_*.txt（调序数据存于用户数据目录）、themes/public/**（空间级公共资源，随 app 提供）、任何层级的 build/（编译产物）
+- **排除**：user.yaml、installation.yaml（本机安装配置）、custom_phrase.txt 及 custom_phrase.db*（自造词动态库）、user_coined_ext.txt（运行时自动生成，含其备份 .bak）、*.userdb/、log/、lua/input_stats_*.lua 及 .bak（未挂载死代码）、lua/sequence_*.txt（调序数据存于用户数据目录）、themes/public/**（空间级公共资源，随 app 提供）、任何层级的 build/（编译产物）
 - **生成**：build/default.yaml 仅含 schema_list 四项（ly_wubi_pinyin / ly_wubi_pinyin_14 / ly_wubi / ly_wubi_14），与源码中的 build/default.yaml 无关，脚本每次生成
 - 脚本内置数量校验：≠60 时告警（曾靠它抓到 themes/14key_wubi/build/ 漏排）
 
