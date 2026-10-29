@@ -158,6 +158,19 @@ end
 local char_code_cache = {}
 local char_code_cache_n = 0
 
+-- ★ 2026-10-29 自动造词卡顿修复：
+--   上面的 char_code_cache 是「按需单字缓存」，首次遇到某个字仍要 io.open 打开
+--   ly_wubi.dict.yaml 逐行扫 **14.8 万行**（真机日志实证：auto_coined*P 在有提交的
+--   那一键 cost 飙到 1182µs，无提交时仅 5~10µs）。自动造词为每个相邻窗口词的每个字
+--   都查编码，生僻字/新字持续触发全量扫描 ⇒ 每次上屏瞬间卡顿。
+--   改成「懒加载全量字典」：首次查码时**一次性**把整本字典读进内存哈希表
+--   { 字 → 最高权重编码 }，之后 O(1) 查表，永不再碰磁盘。14.8 万行只读一次，
+--   内存占用约 2~3MB（可接受），换来彻底消除每键同步扫盘。
+--   加载失败（字典路径尚未就绪等）时不固化空字典，下次调用会重试；查不到字就返回空码，
+--   上层（generate_standard_code）拿不到完整码时仍会走 splitinput 降级，行为与修复前一致。
+local char_dict_cache = nil     -- 全量字典哈希表（懒加载）
+local char_dict_done  = false   -- 是否已成功加载过全量字典（失败保持 false，下次重试）
+
 -- ★ 2026-10-25 造词专用日志（独立的低音量开关）。
 --   与上面的 klog 不同：klog 每按一个键打 1~3 条（2702 键 7567 条）必须常关；
 --   本开关只在「手动造词」这条窄路径上记录（input 含反引号 / 空格落词条 / 真正落盘），
@@ -195,119 +208,103 @@ local function code_cache_put(k, v)
     return v
 end
 
--- 从字典文件中查询单个汉字的标准五笔编码
-local function get_char_wubi_code(char)
-    -- 优先从缓存中获取
-    if char_code_cache[char] then
-        return char_code_cache[char]
-    end
-    
-    -- 获取可能的字典文件路径
+-- 收集所有可能的字典文件路径（ly_wubi 新名优先，wubi / wubi.extended 旧名兜底）
+local function collect_dict_paths()
     local dict_paths = {}
-    
-    -- 1. 尝试用户数据目录
-    local user_dir = ""
-    if rime_api and rime_api.get_user_data_dir then
-        user_dir = rime_api.get_user_data_dir() or ""
-    end
-    if user_dir ~= "" then
-        user_dir = user_dir:gsub("\\", "/")
-        if user_dir:sub(-1) ~= "/" then
-            user_dir = user_dir .. "/"
-        end
+    local function add_dir(dir)
+        if not dir or dir == "" then return end
+        dir = dir:gsub("\\", "/")
+        if dir:sub(-1) ~= "/" then dir = dir .. "/" end
         -- ★ 2026-10-25 修复：主词库已由 wubi.dict.yaml 改名为 ly_wubi.dict.yaml，
         --   旧名找不到 ⇒ 标准编码查询失败 ⇒ 造词只能降级用用户输入的编码。
         --   两个名字都留着（新名优先，旧名兜底），兼容任何一台还没同步字典的设备。
-        table.insert(dict_paths, user_dir .. "ly_wubi.dict.yaml")
-        table.insert(dict_paths, user_dir .. "wubi.dict.yaml")
-        table.insert(dict_paths, user_dir .. "wubi.extended.dict.yaml")
+        table.insert(dict_paths, dir .. "ly_wubi.dict.yaml")
+        table.insert(dict_paths, dir .. "wubi.dict.yaml")
+        table.insert(dict_paths, dir .. "wubi.extended.dict.yaml")
     end
-    
-    -- 2. 尝试方案数据目录
-    local schema_dir = ""
-    if rime_api and rime_api.get_schema_data_dir then
-        schema_dir = rime_api.get_schema_data_dir() or ""
+    add_dir(rime_api and rime_api.get_user_data_dir and rime_api.get_user_data_dir())
+    add_dir(rime_api and rime_api.get_schema_data_dir and rime_api.get_schema_data_dir())
+    add_dir(rime_api and rime_api.get_shared_data_dir and rime_api.get_shared_data_dir())
+    return dict_paths
+end
+
+-- 单行解析：返回 text, code, weight（缺权重返回 0；非数据行返回 nil）
+local function parse_dict_line(trimmed)
+    local text, code, weight = trimmed:match("^([^\t%s]+)[\t%s]+([a-z]+)[\t%s]+(%d+)$")
+    if text and code then
+        return text, code, tonumber(weight) or 0
     end
-    if schema_dir ~= "" then
-        schema_dir = schema_dir:gsub("\\", "/")
-        if schema_dir:sub(-1) ~= "/" then
-            schema_dir = schema_dir .. "/"
-        end
-        table.insert(dict_paths, schema_dir .. "ly_wubi.dict.yaml")
-        table.insert(dict_paths, schema_dir .. "wubi.dict.yaml")
-        table.insert(dict_paths, schema_dir .. "wubi.extended.dict.yaml")
+    -- 更宽松匹配（无权重列）
+    local text2, code2 = trimmed:match("^([^\t%s]+)[\t%s]+([a-z]+)$")
+    if text2 and code2 then
+        return text2, code2, 0
     end
-    
-    -- 3. 尝试共享数据目录（某些发行版可能在这里）
-    if rime_api and rime_api.get_shared_data_dir then
-        local shared_dir = rime_api.get_shared_data_dir() or ""
-        if shared_dir ~= "" then
-            shared_dir = shared_dir:gsub("\\", "/")
-            if shared_dir:sub(-1) ~= "/" then
-                shared_dir = shared_dir .. "/"
-            end
-            table.insert(dict_paths, shared_dir .. "ly_wubi.dict.yaml")
-            table.insert(dict_paths, shared_dir .. "wubi.dict.yaml")
-            table.insert(dict_paths, shared_dir .. "wubi.extended.dict.yaml")
-        end
-    end
-    
-    local code = ""
-    local max_weight = 0
-    local found_file = ""
-    
-    for _, dict_path in ipairs(dict_paths) do
-        local f = io.open(dict_path, "r")
+    return nil
+end
+
+-- ★ 2026-10-29 懒加载全量字典：一次性把整本 ly_wubi.dict.yaml 读进内存哈希表
+--   { 字 → 最高权重编码 }。之后 O(1) 查表，永不再逐字扫 14.8 万行。
+local function build_char_dict()
+    local dict = {}
+    for _, dict_path in ipairs(collect_dict_paths()) do
+        local f = io.open(dict_path, "rb")
         if f then
             local in_data = false
-            local line_num = 0
-            for line in f:lines() do
-                line_num = line_num + 1
-                -- 去除行尾空白字符（处理不同平台的行尾符）
-                local trimmed_line = line:gsub("%s+$", "")
-                -- 跳过注释和元数据部分
-                if trimmed_line == "..." then
+            for raw in f:lines() do
+                local line = raw:gsub("\r$", ""):gsub("%s+$", "")
+                if line == "..." then
                     in_data = true
-                elseif trimmed_line == "---" then
+                elseif line == "---" then
                     in_data = false
                 elseif in_data and not line:match("^#") then
-                    -- 尝试匹配字典条目格式（支持制表符或空格分隔）
-                    -- 格式：字符 编码 权重
-                    local text, code_part, weight = line:match("^([^\t%s]+)[\t%s]+([a-z]+)[\t%s]+(%d+)")
-                    if text and code_part then
-                        -- 检查是否找到目标字符
-                        if text == char then
-                            local w = tonumber(weight) or 0
-                            -- 选择权重最高的编码（通常是最常用的）
-                            if w > max_weight then
-                                max_weight = w
-                                code = code_part
-                                found_file = dict_path
-                            end
-                        end
-                    else
-                        -- 尝试更宽松的匹配
-                        local text2, code_part2 = line:match("^([^\t%s]+)[\t%s]+([a-z]+)")
-                        if text2 and code_part2 and text2 == char then
-                            -- 如果没有权重字段，使用默认权重
-                            if max_weight == 0 then
-                                code = code_part2
-                                found_file = dict_path
-                            end
+                    local text, code, w = parse_dict_line(line)
+                    -- ★ 只保留单字：get_char_wubi_code 只查单字编码，多字词行占
+                    --   14.8 万行的大头，无需入表，内存从 ~3MB 降到 ~0.5MB。
+                    if text and utf8.len(text) == 1 then
+                        local cur = dict[text]
+                        if not cur then
+                            dict[text] = { code = code, w = w }
+                        elseif w > cur.w then
+                            cur.code, cur.w = code, w
                         end
                     end
                 end
             end
             f:close()
-            if code ~= "" then
-                break  -- 找到编码后就不再尝试其他文件
+            -- 找到第一个可用的字典文件就停（ly_wubi 优先级最高，已含全部单字）
+            if next(dict) then
+                break
             end
         end
     end
-    
-    -- 缓存结果（包括空结果，避免重复查询）★ 强引用 + O(1) 计数
-    code_cache_put(char, code)
-    return code
+    -- ★ 只有真正读到了字典数据才算「已加载」；失败（路径尚未就绪等）则下次调用再重试，
+    --   避免把「空字典」永久固化、导致整个 session 都查不到码。
+    if next(dict) then
+        char_dict_done = true
+    end
+    return dict
+end
+
+-- 从字典文件中查询单个汉字的标准五笔编码
+local function get_char_wubi_code(char)
+    -- ① 逐字缓存（2000 条上限，命中即返回，含空结果）
+    if char_code_cache[char] then
+        return char_code_cache[char]
+    end
+
+    -- ② 全量字典懒加载（首次调用一次性读盘，之后 O(1) 查表）
+    if not char_dict_done then
+        char_dict_cache = build_char_dict()
+    end
+    if char_dict_cache then
+        local e = char_dict_cache[char]
+        if e then
+            return code_cache_put(char, e.code)
+        end
+    end
+
+    -- ③ 全量字典加载失败 / 查不到 ⇒ 返回空（让上层走 splitinput 降级）
+    return code_cache_put(char, "")
 end
 
 -- 根据词条内容生成标准五笔词组编码
@@ -607,7 +604,11 @@ local function load_userphrase_list()
             if text and code then
                 -- ★ 自愈：早期（错误）实现曾把临时词写进手动词库并留下 temp:N 的行，
                 --   这里直接跳过，使这些历史垃圾词彻底失效，不再污染候选。
-                if not flag:match("^temp:") then
+                -- ★ 2026-10-29 修复：自动临时词库（is_temp_file=true）里 temp:N 是
+                --   正常格式，绝不能跳 —— 之前这里无条件跳过，导致所有自动临时词
+                --   （灾加/灾加岂/加岂…）都进不了候选、永远显示不出来。
+                --   只有读「手动/永久词库」（is_temp_file=false）时才跳过 temp:N 垃圾行。
+                if is_temp_file or not flag:match("^temp:") then
                     list[#list + 1] = { text = text, code = code, flag = flag, temp = is_temp_file }
                 end
             end
@@ -636,8 +637,13 @@ function UserCoined_AppendManual(text, code)
     local p = get_userphrase_path()
     if not p or p == "" then return false end
     -- 已存在则不重复追加（去重）
+    -- ★ 2026-10-29 修复：转正去重只能查「手动/永久词库」，绝不能把临时词库也算进去。
+    --   load_userphrase_list 同时含手动词(temp=false)与自动临时词(temp=true)；
+    --   若不排除临时词，召回某临时词转正时，去重循环会在临时库里命中同一条目、
+    --   误判「已存在」直接 return true —— 结果既不追加进手动库、又被 auto_coined
+    --   当作已转正从临时库里删掉 ⇒ 词条凭空消失、永远转不了正。
     for _, e in ipairs(load_userphrase_list() or {}) do
-        if e.text == text and e.code == code then return true end
+        if not e.temp and e.text == text and e.code == code then return true end
     end
     local f = io.open(p, "ab")
     if not f then return false end

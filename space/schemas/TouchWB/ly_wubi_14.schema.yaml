@@ -128,8 +128,8 @@ engine:
     - lua_processor@*calc_symbol_processor
     - ascii_composer
     - lua_processor@*smart_assoc*P     # 智能联想：★ 必须在 Submit_text / punctuator 之前
+    - lua_processor@*auto_coined*P     # 自动连词造词：★ 必须在 Submit_text 之前（空格上屏即时入链）
     - lua_processor@*Submit_text
-    - lua_processor@*auto_coined*P     # 自动连词造词（auto_coined 开关控制，关时零开销）
     - lua_processor@*user_coined_cmd*P    # 自造词管理：/zcscN 接管序号数字键
     - lua_processor@*super_tips
     - lua_processor@*super_sequence*P
