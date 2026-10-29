@@ -353,6 +353,11 @@ local function generate_standard_code(text)
     return result
 end
 
+-- ★ 2026-10-28：暴露给自动造词模块（auto_coined.lua）复用，
+--   保证「自动连词造词」与「手动 ` 造词」走同一套词组码生成逻辑，
+--   同一词条两者码逐字节一致，召回零冲突。
+rawset(_G, "auto_coined_stdcode", generate_standard_code)
+
 -- =================================================================
 -- == 自造词路径管理模块 ==
 -- =================================================================
@@ -384,6 +389,31 @@ local userphrasepath = init_userphrase_path()
 function get_userphrase_path()
     return userphrasepath
 end
+
+-- ★ 2026-10-28 修复：自动连词造词的「临时词」改存**独立文件** user_coined_auto.txt。
+--   原实现把临时词写进手动词库 user_coined_ext.txt 的第三列，并用整文件重写的方式落盘，
+--   与手动造词的 append 写入产生竞态 ⇒ 手动词被覆盖丢失。物理隔离后此问题从根上消除。
+local function init_autophrase_path()
+    local rime_dir = get_rime_user_dir()
+    if rime_dir == "" then
+        return ""
+    end
+    rime_dir = rime_dir:gsub("\\", "/")
+    if rime_dir:sub(-1) ~= "/" then
+        rime_dir = rime_dir .. "/"
+    end
+    return rime_dir .. "user_coined_auto.txt"
+end
+
+local autophrasepath = init_autophrase_path()
+
+function get_autophrase_path()
+    if not autophrasepath or autophrasepath == "" then
+        autophrasepath = init_autophrase_path()
+    end
+    return autophrasepath
+end
+rawset(_G, "get_autophrase_path", get_autophrase_path)
 
 local function ensure_userphrase_file()
     -- ★ 2026-10-25：module 加载时 userphrasepath 只在 dofile 的那一刻求值一次；
@@ -554,18 +584,39 @@ end
 --     · 文件唯一的写入者就是上面的 fileappendtext ⇒ 写完立即置空缓存；
 --     · 再加 60 秒兜底刷新，防止用户在别处（同步 / 手动导入）改了文件。
 -- =================================================================
+-- 解析一行：返回 text, code, flag（flag 空串 = 无第三列）
+local function parse_uc_line(line)
+    if not line or line == "" or line:match("^#") then return nil end
+    local text, code, flag = line:match("^([^\t]+)\t([a-z]+)\t?(.*)$")
+    if not text or not code then return nil end
+    return text, code, flag or ""
+end
+
 local function load_userphrase_list()
     if not userphrasepath or userphrasepath == "" then return nil end
-    local file = io.open(userphrasepath, "r")
-    if not file then return nil end
     local list = {}
-    for line in file:lines() do
-        if not line:match("^#") and line ~= "" then
-            local text, code = line:match("^([^\t]+)\t([a-z]+)")
-            if text and code then list[#list + 1] = { text = text, code = code } end
+
+    -- 读一个词库文件；is_temp=true 表示该文件里的词条是「自动临时词」
+    local function read_file(path, is_temp_file)
+        if not path or path == "" then return end
+        local f = io.open(path, "r")
+        if not f then return end
+        for line in f:lines() do
+            line = line:gsub("\r$", "")
+            local text, code, flag = parse_uc_line(line)
+            if text and code then
+                -- ★ 自愈：早期（错误）实现曾把临时词写进手动词库并留下 temp:N 的行，
+                --   这里直接跳过，使这些历史垃圾词彻底失效，不再污染候选。
+                if not flag:match("^temp:") then
+                    list[#list + 1] = { text = text, code = code, flag = flag, temp = is_temp_file }
+                end
+            end
         end
+        f:close()
     end
-    file:close()
+
+    read_file(userphrasepath, false)         -- 手动/永久词库
+    read_file(get_autophrase_path(), true)   -- 自动临时词库（独立文件）
     return list
 end
 
@@ -575,6 +626,27 @@ local function get_userphrase_list()
     _uc_cache = { list = load_userphrase_list() or {}, ts = now }
     return _uc_cache.list
 end
+
+-- ★ 2026-10-28：把一条自动临时词「转正」为永久词 —— 追加进手动词库 user_coined_ext.txt。
+--   转正后它与手动造词完全同构（同样受 /zctj /zccx /zcdr 等命令管理），
+--   因此 ——> 自动造词与手动造词最终汇入同一个词库，但生产路径互不干扰。
+function UserCoined_AppendManual(text, code)
+    if not text or text == "" or not code or code == "" then return false end
+    ensure_userphrase_file()
+    local p = get_userphrase_path()
+    if not p or p == "" then return false end
+    -- 已存在则不重复追加（去重）
+    for _, e in ipairs(load_userphrase_list() or {}) do
+        if e.text == text and e.code == code then return true end
+    end
+    local f = io.open(p, "ab")
+    if not f then return false end
+    f:write(text .. "\t" .. code .. "\n")
+    f:close()
+    _uc_cache = nil
+    return true
+end
+rawset(_G, "UserCoined_AppendManual", UserCoined_AppendManual)
 
 -- =================================================================
 -- == 处理器：自造词记录 ==
@@ -832,12 +904,15 @@ local function user_coined_translator(input, seg, env)
     local norm_input = use_dual_key and normalize_14key(query_input) or query_input
     
     local seen = {}
-    local function yield_user_coined(text, code, quality)
+    local function yield_user_coined(text, code, quality, is_temp)
         if seen[text] then
             return
         end
         seen[text] = true
-        local cand = Candidate("user_coined", seg.start, seg._end, text, code)
+        -- 自动临时词在候选码后加 ☯（与手动造词视觉标记一致的图标）；
+        -- 转正后迁入手动词库 user_coined_ext.txt，不再带 temp 标记 ⇒ 图标自动消失。
+        local disp = is_temp and (code .. "☯") or code
+        local cand = Candidate("user_coined", seg.start, seg._end, text, disp)
         cand.quality = quality
         yield(cand)
     end
@@ -845,6 +920,7 @@ local function user_coined_translator(input, seg, env)
     local code_prefix
     for _, e in ipairs(entries) do
         local text, code = e.text, e.code
+        local is_temp = (e.temp == true)
         code_prefix = code:sub(1, #query_input)
         local exact_match = (code == query_input)
         local prefix_match = (#query_input >= 2 and code:find("^" .. query_input) == 1)
@@ -866,7 +942,18 @@ local function user_coined_translator(input, seg, env)
             dual_reverse_prefix_match = (not exact_match and not prefix_match and not reverse_prefix_match and #query_input > #code and norm_input:find("^" .. norm_stored) == 1)
         end
 
-        if exact_match then
+        if is_temp then
+            -- ★ 2026-10-28 修复：自动临时词【只在整码精确匹配时浮现】。
+            --   原实现让临时词参与前缀/反向/14键模糊匹配，且 quality 高达 850~950，
+            --   于是每输入两三个字母就冒出一堆自动垃圾词抢占前排候选：
+            --     · 正常词被顶到后几页（要翻候选栏）
+            --     · 手动造词要求目标字在第一候选 ⇒ 被临时词挤掉而造不了词
+            --   现在临时词仅当你「故意打出它的完整词组码」时才出现（用于召回转正），
+            --   平时零污染；且 quality 800 低于手动词的 950，不会压住已确认的手动词。
+            if exact_match then
+                yield_user_coined(text, code, 800, true)
+            end
+        elseif exact_match then
             yield_user_coined(text, code, 950)   -- 精确匹配：高于所有候选（拼音候选最高约800）
         elseif dual_exact_match then
             yield_user_coined(text, code, 900)   -- 14键模糊精确匹配：低于精确匹配

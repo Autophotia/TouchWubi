@@ -122,6 +122,12 @@ switches:
     reset: 1                # 默认值为1（带固定词库）
     states: [ 纯历史, 带词库 ]
     comment: "固定联想词库：开=冷启动也有候选；关=只联想自己打过的（万象那种「纯靠养」）"
+  # 自动连词造词（auto_coined）：连打即造临时词，用词组码召回转正；关=仅手动 ` 造词
+  - name: auto_coined
+    reset: 0                # 默认关（手动优先）
+    states: [ 手造词, 自造词 ]
+    comment: "自动连词造词：开启后连打相邻字词自动生成临时词，用其词组码召回并上屏即转正；关闭则仅保留手动 ` 造词"
+
   - name: prediction
     reset: 1
     states: [ 总联想关, 总联想开 ]
@@ -134,6 +140,7 @@ engine:
     - ascii_composer
     - lua_processor@*smart_assoc*P     # 智能联想：★ 必须在 Submit_text / punctuator 之前
     - lua_processor@*Submit_text
+    - lua_processor@*auto_coined*P     # 自动连词造词（auto_coined 开关控制，关时零开销）
     - lua_processor@*user_coined_cmd*P    # 自造词管理：/zcscN 接管序号数字键
     - lua_processor@*super_tips
     - lua_processor@*super_sequence*P

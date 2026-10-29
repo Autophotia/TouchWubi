@@ -708,7 +708,7 @@ local _af_live_code = nil          -- 最新的完整输入码
 -- 【为什么必须换 —— 这才是「连打两次没反应」的真根因】
 --   旧实现算指纹靠 `for e in context.commit_history:iter()`，
 --   而 smart_assoc.lua 第 637 行早就实测写明：
---     · commit_history:iter() **不可用**（迭代出的是 std::reverse_iterator 结构体）
+--     · commit_history:iter() 在本构建不适用（迭代出的是 std::reverse_iterator 结构体，无法被 Lua 遍历），这是绑定层形态而非故障。
 --     · commit_history.size 是**属性**不是方法
 --     · commit_history:back() 可用
 --   也就是说旧实现每次都走进 pcall 的退化分支，只剩 back().text 一个判据。

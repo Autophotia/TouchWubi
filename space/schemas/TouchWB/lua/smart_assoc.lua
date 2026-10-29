@@ -680,7 +680,7 @@ end
 -- 二、如何判断「发生了一次新的上屏」
 -- ===================================================================
 -- 本 librime 版本实测（2026-09-26）：
---   · commit_history:iter() **不可用** —— 迭代出来的是 std::reverse_iterator 结构体。
+--   · commit_history:iter() 在本构建不适用：迭代出来的是 std::reverse_iterator 结构体（无法被 Lua 的 for … in 遍历）。这是绑定层暴露接口的形态（记录数据完好，可经 size / back() 读取），并非运行故障，不必“修复”。
 --   · commit_history.size 是**属性**（数字）而不是方法；`size()` 会报
 --     "attempt to call a number value"。
 --   · commit_history:back() 可用，.text / .type 都能取。
