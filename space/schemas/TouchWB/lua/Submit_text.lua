@@ -11,7 +11,7 @@
     修复: 添加反向前缀匹配（输入编码以存储编码开头），解决5码输入无法匹配自造词问题
 
     【主要功能】
-    1. 自造词手动模式：输入"词条`编码"后按空格键，自动追加到 user_coined_ext.txt
+    1. 手动造词（徐码式逐字/词组累积）：长按 Z（反引号）逐段输编码、翻页选字上屏，全部选定后长按 Z 再按空格，整词落盘 user_coined_ext.txt
     2. 自造词即时查询：实时读取用户词库，高优先级显示用户自定义词条
     3. 反查功能：按单引号键快速上屏第三候选项（table/reverse_lookup类型）
     4. 快捷上屏：分号键上屏第二候选，单引号键上屏第三候选
@@ -35,7 +35,7 @@
                          右右左左、右右左右、右右右左、右右右右
 
     【使用说明】
-    1. 手动造词：输入编码（可模糊）+ 反引号 + 编码（可模糊）... → 选择候选词后按空格键确认
+    1. 手动造词：长按 Z（反引号）输该字/词组编码（可只输前几码）→ 翻页选字上屏（自动累积）→ 重复至全部选定 → 长按 Z 再按空格保存整词
     2. 智能编码：无论输入模糊编码还是精确编码，保存时自动从字典查询生成标准五笔编码
     3. 快捷上屏：分号键上屏第二候选，单引号键上屏第三候选（反查/表格模式）
     4. 用户词库路径：{user_data_dir}/user_coined_ext.txt，即时生效无需重部署
@@ -168,8 +168,9 @@ local char_code_cache_n = 0
 --   内存占用约 2~3MB（可接受），换来彻底消除每键同步扫盘。
 --   加载失败（字典路径尚未就绪等）时不固化空字典，下次调用会重试；查不到字就返回空码，
 --   上层（generate_standard_code）拿不到完整码时仍会走 splitinput 降级，行为与修复前一致。
-local char_dict_cache = nil     -- 全量字典哈希表（懒加载）
-local char_dict_done  = false   -- 是否已成功加载过全量字典（失败保持 false，下次重试）
+local char_dict_cache   = nil   -- 全量字典哈希表：{ 单字 -> { code, w } }（懒加载）
+local char_dict_phrases = nil   -- 主词典多字词集合：{ 词 -> true }（自动造词「主词典已有词不重复造」去重用）
+local char_dict_done    = false -- 是否已成功加载过全量字典（失败保持 false，下次重试）
 
 -- ★ 2026-10-25 造词专用日志（独立的低音量开关）。
 --   与上面的 klog 不同：klog 每按一个键打 1~3 条（2702 键 7567 条）必须常关；
@@ -190,6 +191,12 @@ local function valid_word(s)
     if s:find("%a") then return false end
     local ok, n = pcall(utf8.len, s)
     return ok and type(n) == "number" and n > 1
+end
+
+-- 安全取字符串字形数（非法 UTF-8 返回 0）
+local function u8len(s)
+    local ok, n = pcall(utf8.len, s)
+    return (ok and type(n) == "number" and n) or 0
 end
 
 -- 缓存大小限制（防止无限增长）
@@ -244,8 +251,18 @@ end
 
 -- ★ 2026-10-29 懒加载全量字典：一次性把整本 ly_wubi.dict.yaml 读进内存哈希表
 --   { 字 → 最高权重编码 }。之后 O(1) 查表，永不再逐字扫 14.8 万行。
-local function build_char_dict()
-    local dict = {}
+-- ★ 2026-10-30 增加多字词索引：同一遍扫描里顺手把「多字词」也登记进 phrases 集合，
+--   供自动造词（auto_coined.lua）做「主词典已有词不再重复造临时词」的去重。
+--   内存代价：phrases 约 11.5 万条多字词，LuaJIT 哈希表 + 短字符串约 +5~8MB。
+--   权衡：这是「从根源上消除冗余临时词」最直接的办法，且只读一次磁盘，
+--   代价可接受（predict.db 磁盘 7MB、ly_wubi 词典 3MB 都远超此量级）。
+-- ★ 2026-10-31 撤回「code 索引」：手动造词改回 enable_sentence 的徐码式逐字选择
+--   （affix_segmentor + table_translator 原生查重码），不再需要 codes/pcodes 索引。
+--   删除后 build_dicts 回到只构建 dict+phrases，首次加载从 ~513ms 降回基线，
+--   消除「一造词就卡」。
+local function build_dicts()
+    local dict = {}      -- 单字：字 -> { code, w }（取最高权重编码）
+    local phrases = {}   -- 多字词：词 -> true（主词典存在性集合，自动造词去重用）
     for _, dict_path in ipairs(collect_dict_paths()) do
         local f = io.open(dict_path, "rb")
         if f then
@@ -258,20 +275,23 @@ local function build_char_dict()
                     in_data = false
                 elseif in_data and not line:match("^#") then
                     local text, code, w = parse_dict_line(line)
-                    -- ★ 只保留单字：get_char_wubi_code 只查单字编码，多字词行占
-                    --   14.8 万行的大头，无需入表，内存从 ~3MB 降到 ~0.5MB。
-                    if text and utf8.len(text) == 1 then
-                        local cur = dict[text]
-                        if not cur then
-                            dict[text] = { code = code, w = w }
-                        elseif w > cur.w then
-                            cur.code, cur.w = code, w
+                    if text and code then
+                        local n = utf8.len(text)
+                        if n == 1 then
+                            local cur = dict[text]
+                            if not cur then
+                                dict[text] = { code = code, w = w }
+                            elseif w > cur.w then
+                                cur.code, cur.w = code, w
+                            end
+                        elseif n >= 2 then
+                            phrases[text] = true
                         end
                     end
                 end
             end
             f:close()
-            -- 找到第一个可用的字典文件就停（ly_wubi 优先级最高，已含全部单字）
+            -- 找到第一个可用的字典文件就停（ly_wubi 优先级最高，已含全部单字与多字词）
             if next(dict) then
                 break
             end
@@ -282,7 +302,15 @@ local function build_char_dict()
     if next(dict) then
         char_dict_done = true
     end
-    return dict
+    char_dict_cache = dict
+    char_dict_phrases = phrases
+end
+
+-- 确保全量字典已加载（懒加载入口，失败不固化，下次重试）
+local function ensure_dict_loaded()
+    if not char_dict_done then
+        build_dicts()
+    end
 end
 
 -- 从字典文件中查询单个汉字的标准五笔编码
@@ -293,9 +321,7 @@ local function get_char_wubi_code(char)
     end
 
     -- ② 全量字典懒加载（首次调用一次性读盘，之后 O(1) 查表）
-    if not char_dict_done then
-        char_dict_cache = build_char_dict()
-    end
+    ensure_dict_loaded()
     if char_dict_cache then
         local e = char_dict_cache[char]
         if e then
@@ -306,6 +332,16 @@ local function get_char_wubi_code(char)
     -- ③ 全量字典加载失败 / 查不到 ⇒ 返回空（让上层走 splitinput 降级）
     return code_cache_put(char, "")
 end
+
+-- ★ 2026-10-30：暴露给自动造词（auto_coined.lua）做「主词典已有词不重复造」。
+--   返回 true = 该词条已是主词典多字词（ly_wubi.dict.yaml 收录），自动造词应跳过。
+--   字典加载失败时返回 false（宁可造重，也不漏造），行为退化为修复前。
+local function main_dict_has_phrase(text)
+    if type(text) ~= "string" or text == "" then return false end
+    ensure_dict_loaded()
+    return char_dict_phrases ~= nil and char_dict_phrases[text] == true
+end
+rawset(_G, "auto_coined_in_main_dict", main_dict_has_phrase)
 
 -- 根据词条内容生成标准五笔词组编码
 local function generate_standard_code(text)
@@ -598,8 +634,10 @@ local function load_userphrase_list()
         if not path or path == "" then return end
         local f = io.open(path, "r")
         if not f then return end
-        for line in f:lines() do
-            line = line:gsub("\r$", "")
+        for raw in f:lines() do
+            -- ★ Lua 5.4+ 起 for-in 循环变量只读，不能对循环变量本身赋值，
+            --   必须转一道（与 user_coined_cmd.lua 同款写法），否则加载即报错。
+            local line = raw:gsub("\r$", "")
             local text, code, flag = parse_uc_line(line)
             if text and code then
                 -- ★ 自愈：早期（错误）实现曾把临时词写进手动词库并留下 temp:N 的行，
@@ -647,7 +685,12 @@ function UserCoined_AppendManual(text, code)
     end
     local f = io.open(p, "ab")
     if not f then return false end
-    f:write(text .. "\t" .. code .. "\n")
+    -- ★ 2026-10-30 修复「编辑粘进注释头」：改为**前导换行**追加，与 fileappendtext 逐字节一致。
+    --   前导 \n 会在 3 行注释头之后自然隔出一个空行（第 4 行），且无论上一行是否带换行
+    --   都不会粘行。此前这里用**后缀** \n，当文件被 /zcqk、/zcsc、/zcdr 整文件重写后
+    --   （write_lines 末行不带换行），就会把词条粘到注释头上。
+    --   两个写入方统一为「前导 \n」后，自动造词转正与手动造词生成的永久文件行为完全一致。
+    f:write("\n" .. text .. "\t" .. code)
     f:close()
     _uc_cache = nil
     return true
@@ -693,6 +736,82 @@ local function klog(tag, msg)
     pcall(function() if log and log.info then log.info(tag .. " " .. msg) end end)
 end
 
+-- ★ 2026-10-31：手动造词「点击候选栏 / 空格上屏」统一转正保存。
+--   点候选栏 = 前端 Context::Select，不产生按键事件 ⇒ commit_text_processor 收不到。
+--   保存靠 update_notifier 在提交后结算，判定「是否有新上屏」复用 auto_coined.lua
+--   的 detect_and_settle 双判据（size 变 / back 文本变）。
+--   ★ v2.11 废弃 super_sequence 的「输入码变空」判据③：它在 bimkit 点选上屏时会在
+--   「清空 composition 但尚未 commit」那一拍误触发，此刻 back() 还是旧文本，既误结算
+--   又提前消费 _coin_pending_input，导致真正上屏的单字永远进不了缓冲（真机单字无法造词）。
+--   ★ v2.12 notifier 统一「单字/词组一律累积」：删掉 v2.11 的 n>1「整词直接保存」分支，
+--   它会在保存词组时清空 _coin_buf，把已累积的单字误 wipe（真机 之/田/回到家/吃饱 实测）。
+--   notifier 回调拿不到 env 表，所以「是否在手动造词」用模块级 upvalue 预登记。
+local _coin_pending_input = nil   -- 非 nil = 手动造词进行中（含反引号的原始 input）
+local _coin_buf = {}              -- 逐字造词缓冲：累积已上屏的单字/词组（长按Z再按空格结束一次性保存）
+local _coin_code_buf = {}         -- 逐字造词编码缓冲：累积每个单字对应的反引号编码段（作降级编码）
+local _coin_last_size     = nil   -- 上次观察到的 commit_history.size（双判据①）
+local _coin_last_text     = nil   -- 上次观察到的 back().text（双判据②）
+local _coin_hooked        = false -- update_notifier 是否已连接
+local _coin_hooked_schema = nil   -- 连接时对应的 schema_id（切方案时重连）
+
+local function coin_hook_notifier(env)
+    local ctx = env and env.engine and env.engine.context
+    if not ctx then return end
+    local sid = env.engine and env.engine.schema and env.engine.schema.schema_id
+    if _coin_hooked and sid == _coin_hooked_schema then return end
+    _coin_hooked_schema = sid
+    _coin_hooked = true
+    pcall(function()
+        if ctx.update_notifier then
+            ctx.update_notifier:connect(function(c)
+                local size, bt = nil, nil
+                pcall(function() size = c.commit_history.size end)
+                pcall(function()
+                    local b = c.commit_history and c.commit_history:back()
+                    if b then bt = b.text end
+                end)
+
+                -- 首次只记基线（不把历史提交当新提交）
+                if _coin_last_size == nil then
+                    _coin_last_size = size
+                    _coin_last_text = bt
+                    return
+                end
+
+                -- ★ v2.11 双判据（同 auto_coined.lua detect_and_settle）：size 变 或 back 文本变 = 有新上屏。
+                --   废弃旧「输入码非空变空」判据③——它在 bimkit 点选上屏时，会在「清空 composition
+                --   但尚未 commit」那一拍就误触发：此刻 back() 还是上一条旧文本，既误结算，
+                --   又提前消费 _coin_pending_input，等真正 commit 单字时 pending 已 nil，
+                --   单字永远进不了缓冲（真机「单字无法进入造词」根因）。
+                local has_new = (size ~= _coin_last_size) or (bt ~= nil and bt ~= _coin_last_text)
+                _coin_last_text = (bt ~= nil) and bt or _coin_last_text
+                _coin_last_size = size
+
+                if not has_new then return end
+                -- 非手动造词状态 ⇒ 忽略
+                if _coin_pending_input == nil then return end
+                -- bt 尚未就绪（清空 composition 那一拍，back 滞后）⇒ 不消费 pending，等下一拍
+                if bt == nil or bt == "" then return end
+
+                local pending_input = _coin_pending_input
+                _coin_pending_input = nil
+                local n = u8len(bt)
+                if n >= 1 and not bt:find("%a") then
+                    -- ★ v2.12 逐字造词：单字（n==1）或多字词组（n>1）都累积进缓冲，
+                    --   统一由「长按Z再按空格」结束一次性保存。不再把 n>1 当「整词」直接保存——
+                    --   v2.11 那样会把已累积的单字缓冲误清空（真机 之/田/回到家/吃饱 实测：
+                    --   「之田」进缓冲后被「回到家」的整词保存 wipe 掉，词组独立成词、无法组合）。
+                    _coin_buf[#_coin_buf + 1] = bt
+                    _coin_code_buf[#_coin_code_buf + 1] = pending_input or ""
+                    kcoin("ntf", "buf+1 [" .. bt .. "] => [" .. table.concat(_coin_buf) .. "]")
+                else
+                    kcoin("ntf", "skip 非合规 [" .. tostring(bt) .. "]")
+                end
+            end)
+        end
+    end)
+end
+
 local function commit_text_processor(key, env)
     local engine = env.engine
     local context = engine.context
@@ -700,6 +819,9 @@ local function commit_text_processor(key, env)
     local segment = composition:back()
     local input_text = context.input
     local candidate_count = 0
+
+    -- ★ 惰性连接 update_notifier（首次连接后 no-op），让「点候选栏上屏」也能触发手动造词
+    coin_hook_notifier(env)
 
     -- 记录候选词（用于反查等功能）
     if input_text then
@@ -726,73 +848,53 @@ local function commit_text_processor(key, env)
 
     local key_code_num = tonumber(key.keycode) or key.keycode
     local is_space_key = (key_code_num == 0x20) or (key_code_num == 32)
-    
-    -- 手动造词：直接使用原始输入字符串（保留反引号）
+
+    -- ★ 2026-10-31 v2.12 徐码式手动造词（逐字/词组上屏 + 累积保存）：
+    --   这里「预登记」正在造词（input 含反引号），让 table_translator@mkst 吐出的
+    --   sentence 候选（词组）或单字重码（逐字）在空格/点选上屏后，由
+    --   coin_hook_notifier 的 update_notifier 统一结算。单字与词组一律累积进缓冲，
+    --   最后按「长按Z（`）再按空格」一次性保存。
     local function update_manual_userphrase()
-        if input_text and input_text:find("`") then
-            local commit_text = context:get_commit_text() or ""
-            kcoin("probe", "step=commit_text input=[" .. input_text .. "] has_menu=" ..
-                  tostring(context:has_menu()) .. " commit_text=[" .. commit_text .. "]")
-
-            if not valid_word(commit_text) then
-                -- ★ 2026-10-25 兜底：commit_text 拿不到合规词条时，
-                --   改从「当前菜单选中的候选」取值（拿不到选中项就退回首候选）。
-                --   只在原本会判失败的情况下才生效，已成功的路径完全不变。
-                local fb, why = nil, ""
-                pcall(function()
-                    if not context:has_menu() then why = "no_menu"; return end
-                    local n = 0
-                    if segment then
-                        n = segment.menu:candidate_count()
-                        fb = segment:get_selected_candidate()
-                    end
-                    if not fb then fb = context:get_selected_candidate() end
-                    if not fb and n > 0 and segment then fb = segment:get_candidate_at(0) end
-                    if not fb then why = why .. " no_candidate(n=" .. n .. ")" end
-                end)
-                if fb and fb.text and valid_word(fb.text) then
-                    commit_text = fb.text
-                    kcoin("probe", "step=fallback_candidate -> [" .. commit_text .. "]")
-                else
-                    kcoin("probe", "step=fallback_failed " .. why)
-                end
+        if input_text and input_text:find("`", 1, true) then
+            _coin_pending_input = input_text
+        else
+            _coin_pending_input = nil
+            -- ★ 用户开始输入非反引号内容（非空）⇒ 放弃未结束的逐字缓冲
+            if input_text and input_text ~= "" and #_coin_buf > 0 then
+                kcoin("buf", "abandon [" .. table.concat(_coin_buf) .. "]")
+                _coin_buf = {}
+                _coin_code_buf = {}
             end
-
-            if valid_word(commit_text) then
-                env.userphrase = commit_text
-                env.inputtext = input_text   -- 使用原始输入，保留反引号
-                return
-            end
-            kcoin("probe", "step=REJECT: 无合规词条 input=[" .. input_text .. "]")
         end
-        env.userphrase = ""
-        env.inputtext = ""
-    end
-
-    -- 处理手动造词：保存并上屏
-    local function handle_manual_coin()
-        if env.userphrase and env.userphrase ~= "" then
-            ensure_userphrase_file()
-            fileappendtext(userphrasepath, env.userphrase, env.inputtext, env)
-            engine:commit_text(env.userphrase)  -- 上屏
-            context:clear()                     -- 清空输入状态
-            env.userphrase = ""
-            env.inputtext = ""
-            return true
-        end
-        return false
     end
 
     update_manual_userphrase()
 
+    -- ★ v2.12 逐字造词结束键 = 长按Z（`）再按空格（放在 has_menu 之前，优先判定）：
+    --   逐字选完所有字/词组后，长按一次 Z（输入区出现纯反引号 `），再按空格 = 保存整词。
+    --   此信号与「空格上屏联想候选」不冲突：联想时 input 为空，而这里要求 input 为纯反引号；
+    --   与「空格上屏编码候选」也不冲突：编码时 input 含字母（如 `rt），不匹配 ^`+$。
+    if is_space_key and #_coin_buf > 0 and input_text and input_text:match("^`+$") then
+        local word = table.concat(_coin_buf)
+        local code_input = table.concat(_coin_code_buf)
+        _coin_buf = {}
+        _coin_code_buf = {}
+        _coin_pending_input = nil
+        if valid_word(word) then
+            ensure_userphrase_file()
+            fileappendtext(userphrasepath, word, code_input, nil)
+            kcoin("end", "OK [" .. word .. "]")
+        else
+            kcoin("end", "discard [" .. word .. "]")
+        end
+        context:clear()  -- 清掉输入区残留的反引号，吞掉本次空格（不插入空白）
+        return 1
+    end
+
     -- ★ S88：原先这里有一段S87 诊断探针 + 「智能联想段豁免空格return 2」，
-    --   已整体删除。理由见文件头 S88 撤销记录：
-    --     ① 长按成功时空格按键根本不会派发到引擎（19:41:10 实测，Lua 侧零事件），
-    --        所以那段豁免在真实长按路径上永远执行不到；
-    --     ② 它只在短按时生效，判据「输入区为空 + 联想标志为真」一旦命中，
-    --        就把用户想打的空格扣住不上屏 ⇒ 空格偶尔失灵，是纯粹的损害。
-    --   现在空格语义回到最朴素的形式：有菜单上屏首候选，否则打空格。
-    if is_space_key and context:has_menu() and not (input_text and input_text:find("`")) then
+    --   已整体删除。理由见文件头 S88 撤销记录（长按语音是 App 内置手势，Lua 别碰空格）。
+    --   空格语义：有菜单就上屏选中（首）候选——造词合成候选也是普通候选，走同一路径。
+    if is_space_key and context:has_menu() then
         local sel = nil
         if segment then sel = segment:get_selected_candidate() end
         if not sel then
@@ -806,16 +908,9 @@ local function commit_text_processor(key, env)
         end
     end
 
-    -- 空格键触发手动造词保存
-    if is_space_key then
-        -- ★ 诊断：空格有没有真走到这一步？（前面的 processor 可能已把它吞掉）
-        kcoin("space", "到达 Submit_text input=[" .. tostring(input_text) ..
-              "] has_backtick=" .. tostring(input_text and input_text:find("`") ~= nil) ..
-              "] has_menu=" .. tostring(context:has_menu()) ..
-              " userphrase=[" .. tostring(env.userphrase) .. "]")
-    end
-    if is_space_key and handle_manual_coin() then
-        return 1
+    -- ★ 诊断：缓冲非空但本次空格未触发结束 ⇒ 打印 input 以便定位结束键时序
+    if is_space_key and #_coin_buf > 0 then
+        kcoin("end", "space buf=" .. #_coin_buf .. " input=[" .. tostring(input_text) .. "] 未匹配^`+$")
     end
 
     -- 单引号键上屏第三候选（有候选菜单时）
@@ -884,7 +979,11 @@ local function user_coined_translator(input, seg, env)
             raw_input = ctx.input or ""
         end
     end
-    
+
+    -- ★ 2026-10-31 撤回：手动造词改回 enable_sentence 的徐码式逐字选择，
+    --   由 table_translator@mkst 原生吐 sentence 候选（含每段单字重码翻页），
+    --   本翻译器不再对反引号输入合成候选；上屏保存交给 coin_hook_notifier。
+
     -- 优先使用原始输入，避免 abbrev 规则导致的编码截断
     -- 如果 raw_input 不为空且是纯字母，则使用它
     local query_input = raw_input:match("^[a-z]+$") or input
@@ -955,9 +1054,13 @@ local function user_coined_translator(input, seg, env)
             --     · 正常词被顶到后几页（要翻候选栏）
             --     · 手动造词要求目标字在第一候选 ⇒ 被临时词挤掉而造不了词
             --   现在临时词仅当你「故意打出它的完整词组码」时才出现（用于召回转正），
-            --   平时零污染；且 quality 800 低于手动词的 950，不会压住已确认的手动词。
+            --   平时零污染。quality 与手动词同为 950：撞码时（临时词编码与主词典高频词
+            --   同码，如 品饮 kkqn vs 咖啡馆 kkqn）确保带 ☯ 的临时词排在前排可点选转正，
+            --   不被主词典词顶到后几页（真机「临时词生成了却召回不到、转不了正」根因）。
             if exact_match then
-                yield_user_coined(text, code, 800, true)
+                yield_user_coined(text, code, 950, true)
+                -- ★ 2026-10-31 v2.16 诊断：精确命中自动临时词时打日志，真机确认「输编码召回 ☯ 候选」是否生效。
+                kcoin("recall", "临时词命中 [" .. text .. "]=" .. code .. " input=" .. query_input)
             end
         elseif exact_match then
             yield_user_coined(text, code, 950)   -- 精确匹配：高于所有候选（拼音候选最高约800）

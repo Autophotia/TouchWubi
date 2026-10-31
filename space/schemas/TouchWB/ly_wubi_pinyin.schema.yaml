@@ -236,6 +236,7 @@ engine:
     - table_translator@fixed
     # 临时自造词翻译器
     - table_translator@mkst
+    - table_translator@mkst_pinyin         # 反引号段拼音筛字：`shou 也能选字（绕开不会打的字）
     - script_translator@wubi_prefix        # 为 wubi_pinyin_filter 提供第 5 码筛选支持（见文末 wubi_prefix 段说明）
     # 反查翻译器：支持拼音反查五笔编码
     - reverse_lookup_translator
@@ -447,9 +448,9 @@ mkst:
   disable_user_dict_for_patterns:
     - "^z.*$"
   enable_charset_filter: false
-  enable_completion: false
+  enable_completion: true            # ★ 2026-10-31 v2.9：开补全，反引号编码出单字重码（逐字翻页选字绕开不会打的字）
   enable_encoder: false
-  enable_sentence: true
+  enable_sentence: true             # ★ 2026-10-31 开：恢复徐码式逐字翻页选字（affix_segmentor 分段 + table_translator 查重码），保存改由 Submit_text 的 notifier 结算
   enable_user_dict: false
   encode_commit_history: false
   initial_quality: 450
@@ -457,6 +458,23 @@ mkst:
   prefix: "`"
   tag: mkst
   tips: "〔自造词〕"
+
+# ★ 2026-10-31：反引号段拼音筛字（手动造词用拼音选字，绕开不会打的字）。
+#   与 mkst（五笔）共用同一反引号段（tag=mkst）：输入 `rt 走五笔、输入 `shou 走拼音。
+mkst_pinyin:
+  db_class: tabledb
+  dictionary: ly_pinyin
+  prism: ly_pinyin
+  prefix: "`"
+  tag: mkst
+  initial_quality: 400            # 低于五笔 mkst(450)：反引号段五笔候选优先
+  enable_completion: false
+  enable_sentence: false
+  enable_encoder: false
+  enable_user_dict: false
+  encode_commit_history: false
+  enable_charset_filter: false
+  max_phrase_length: 4
 
 # 样式配置（输入法界面样式）
 style:

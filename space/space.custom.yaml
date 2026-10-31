@@ -2,10 +2,10 @@
 # 用户自定义配置，使用librime patch语法覆盖space.yaml中的配置
 
 patch:
-  schema_id: ly_wubi
+  schema_id: ly_wubi_14
   schema: TouchWB
   schema_dir: schemas/
-  theme: 26key_wubi
+  theme: 14key_wubi
   theme_dir: schemas/TouchWB/themes/
   font: default
   font_dir: fonts/
@@ -22,4 +22,11 @@ patch:
   haptics_volume: 1
   haptic: system
   haptic_dir: haptics/
-  global_keyboard_menu: [function_common_open_vip, function_common_speech_recognition, eisu_toggle_emoji, eisu_toggle_clip_board, eisu_toggle_cut_quick_panel, eisu_toggle_clear_quick_panel, eisu_toggle_status_bar_board]
+  global_keyboard_menu:
+    - function_common_open_vip
+    - function_common_speech_recognition
+    - eisu_toggle_emoji
+    - eisu_toggle_clip_board
+    - eisu_toggle_cut_quick_panel
+    - eisu_toggle_clear_quick_panel
+    - eisu_toggle_status_bar_board

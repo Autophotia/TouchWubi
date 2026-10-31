@@ -440,9 +440,9 @@ mkst:
   disable_user_dict_for_patterns:
     - "^z.*$"
   enable_charset_filter: false
-  enable_completion: false
+  enable_completion: true            # ★ 2026-10-31 v2.9：开补全，反引号编码出单字重码（逐字翻页选字绕开不会打的字）
   enable_encoder: false
-  enable_sentence: true
+  enable_sentence: true             # ★ 2026-10-31 开：恢复徐码式逐字翻页选字（affix_segmentor 分段 + table_translator 查重码），保存改由 Submit_text 的 notifier 结算
   enable_user_dict: false
   encode_commit_history: false
   initial_quality: 450

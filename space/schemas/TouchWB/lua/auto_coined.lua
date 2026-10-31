@@ -1,5 +1,5 @@
 -- ============================================================================
--- auto_coined.lua —— TouchWB 自动连词造词（v2.1 · 2026-10-29 修复：最后一个字丢失 + 简码错字）
+-- auto_coined.lua —— TouchWB 自动连词造词（v2.2 · 2026-10-30 修复：重复造主词典已有词 + 点击候选栏上屏入链）
 --   思路源于 sbsrf 声笔 auto_length，但按 TouchWB 现状重写。
 --
 --   【版本脉络】
@@ -10,11 +10,16 @@
 --          	b) 写自己的注释头
 --          	c) 所有相邻 2..5 窗口（原来只取以最新提交收尾的后缀）
 --          	d) 临时词只在整码精确匹配时浮现（Submit_text.lua 侧）
---     v2.1 本次针对真机（00:15 会话）三个新现象：
+--     v2.1 针对真机（00:15 会话）三个新现象：
 --          A. 「最后一个字不参与造词」—— 见下方【陷阱】①
---          B. 造词结果稀疏不规则（打一串只出零星几个词）—— 见下方【陷阱】①②
---          C. 撞码：临时词「我人有」与主词典固有词「我们有」同码 twde，
---             永远召回不到 ⇒ 必定躲不过的垃圾词 —— 见下方【陷阱】④
+--          B. 造词结果稀疏不规则 —— 见下方【陷阱】①②
+--          C. 撞码：临时词「我人有」与主词典固有词「我们有」同码 twde —— 见【陷阱】④
+--     v2.2 针对真机（10-30 会话）两个新现象：
+--          A. 「重复造主词典已有词」：数据/最好/造词/编辑 等主词典已收录的词仍被造成
+--             临时词并转正，冗余占位 + 重复候选 + 冗余入库 —— 见【修复 A】
+--          B. 「点击候选栏上屏」不参与造词：移动端最常用的上屏方式是点候选栏，但
+--             点候选栏不产生按键事件，旧实现只在按键路径结算 ⇒ 点选的词永远入不了链
+--             —— 见【修复 B】
 --
 --   【陷阱】—— 这些都是本 librime 构建实测出来的接口形态，不是故障，不必去“修”：
 --     ① commit_history:back() **滞后一拍**：只有当次按键之后才看得到上一次提交。
@@ -59,11 +64,16 @@ local HIST_KEEP        = 6     -- _hist 缓冲保留条数（≥ MAX_PHRASE 即�
 --   参考 smart_assoc 的 IDLE_BREAK_SEC=300 思路，把词组边界阈值放宽到 20 秒：
 --   连续打一串字造词的正常停顿（含想生僻字编码）不会被切碎，只有明确停手换话题
 --   （>20s）才断链。误连的代价很小——临时词只在整码精确匹配时才浮现，且会过期淘汰。
-local PHRASE_GAP_SEC   = 20    -- 两次提交间隔超过此秒数 ⇒ 认为是新词组
+-- ★ 2026-10-31 放宽到 120 秒：真机实测「五笔拼音混输 + 五码筛选」打词时，用户用拼音
+--   逐个翻候选找字，两个词之间停顿常达 25~44 秒（如 品饮→朝廷 40s、朝廷→金星 25s），
+--   20s 阈值把本应同属一串的相邻词（品饮朝廷、朝廷金星）误切断链，导致这些相邻组合
+--   临时词整片丢失（真机「带朝廷的相邻字组合一个都没有」根因）。拼音翻候选的停顿
+--   远慢于五笔盲打，阈值需覆盖它；误连代价依旧很小（临时词整码精确匹配才浮现 + 过期淘汰）。
+local PHRASE_GAP_SEC   = 120   -- 两次提交间隔超过此秒数 ⇒ 认为是新词组
 local DELETE_THRESHOLD = 200   -- 临时词超过 200 次提交仍未被召回转正 ⇒ 淘汰
 local MAX_TEMP_ENTRIES = 300   -- 临时词总量上限，超出则淘汰最旧的
 local CLEANUP_EVERY    = 30    -- 每 30 次提交触发一次惰性清理
-local DEBUG_LOG        = false -- 逐键诊断日志（真机 log.info 是同步写；2026-10-29 复测验收通过后已关）
+local DEBUG_LOG        = true  -- 逐键诊断日志（2026-10-31 复开：抓「临时词转正/撞码」真机日志，定位转正失败）
 
 local AUTO_HEADER = {
     "# 自动连词造词的临时词库（勿手工编辑）",
@@ -113,6 +123,8 @@ local _last_back  = nil         -- 上一次消费过的 commit_history:back().t
 local _last_size  = 0           -- 上一次消费过的 commit_history.size（连打同词时 size 也会 +1）
 local _primed     = false       -- 首次进来先把 back 记下来，避免把历史提交当新提交
 local _pend_ts    = 0           -- 上一个正常编码键按下的时戳（用于词组间隔的准确判定）
+local _hooked     = false       -- update_notifier 是否已连接
+local _hooked_schema = nil      -- 连接时对应的 schema_id（切方案时重连）
 
 -- 纯汉字判定：UTF-8 中日韩基本区 U+4E00..U+9FFF ⇒ [\228-\233][\128-\191][\128-\191]
 local CJK_RUN = "[\228-\233][\128-\191][\128-\191]"
@@ -129,12 +141,31 @@ local function is_cjk_word(s)
     return s:gsub(CJK_RUN, "") == ""
 end
 
+-- ★ 按字拆分纯汉字串（调用前已由 is_cjk_word 保证全由 CJK 基本区汉字组成）
+local function split_chars(s)
+    local out = {}
+    for ch in s:gmatch(CJK_RUN) do
+        out[#out + 1] = ch
+    end
+    return out
+end
+
 -- ---- 依赖的全局（由 Submit_text.lua / 引擎提供） ----
 local function stdcode(phrase)
     local f = _G.auto_coined_stdcode
     if type(f) ~= "function" then return "" end
     local ok, c = pcall(f, phrase)
     return (ok and c) and c or ""
+end
+
+-- ★ v2.2 修复 A：主词典已有词不重复造。
+--   由 Submit_text.lua 暴露的 auto_coined_in_main_dict 判断（字典懒加载，O(1)）。
+--   拿不到该函数（模块未加载 / 字典未就绪）时返回 false ⇒ 退化为「照旧造词」，绝不漏造。
+local function in_main_dict(phrase)
+    local f = _G.auto_coined_in_main_dict
+    if type(f) ~= "function" then return false end
+    local ok, r = pcall(f, phrase)
+    return (ok and r) == true
 end
 
 local function get_path()
@@ -168,9 +199,10 @@ local function read_rows(path)
     local f = io.open(path, "rb")
     if not f then return rows end
     for raw in f:lines() do
-        raw = raw:gsub("\r$", "")
-        if not raw:match("^#") then
-            local text, code, flag = raw:match("^([^\t]+)\t([a-z]+)\t?(.*)$")
+        -- ★ Lua 5.4+ 起 for-in 循环变量只读，不能对循环变量本身赋值，转一道
+        local line = raw:gsub("\r$", "")
+        if not line:match("^#") then
+            local text, code, flag = line:match("^([^\t]+)\t([a-z]+)\t?(.*)$")
             if text and code then
                 local n = tonumber((flag or ""):match("^temp:(%d+)$"))
                 rows[#rows + 1] = { text = text, code = code, tick = n or 0 }
@@ -187,6 +219,9 @@ local function write_rows(path, rows)
     local f = io.open(tmp, "wb")
     if not f then return false end
     for _, l in ipairs(AUTO_HEADER) do f:write(l, "\n") end
+    -- ★ 2026-10-30：头三行后补一个空行，与手动词库 user_coined_ext.txt 的
+    --   「三行注释头 + 第四行空行」保持一致（用户反馈两个 txt 头不一致）。
+    f:write("\n")
     for _, e in ipairs(rows) do
         f:write(e.text, "\t", e.code, "\ttemp:", tostring(e.tick), "\n")
     end
@@ -237,8 +272,9 @@ local function snapshot_manual()
         local f = io.open(mp, "rb")
         if f then
             for raw in f:lines() do
-                raw = raw:gsub("\r$", "")
-                local t, c = raw:match("^([^\t]+)\t([a-z]+)")
+                -- ★ Lua 5.4+ 起 for-in 循环变量只读，转一道
+                local line = raw:gsub("\r$", "")
+                local t, c = line:match("^([^\t]+)\t([a-z]+)")
                 if t and c then
                     exist[t .. "\t" .. c] = true
                     owner[c] = true
@@ -290,7 +326,10 @@ end
 local function build_phrases(adds, exist, owner)
     local n = #_hist
     if n < 2 then return end
-    local start0 = math.max(1, n - MAX_PHRASE + 1)
+    -- ★ 2026-10-30：起点固定 1。旧公式 max(1, n-MAX_PHRASE+1) 在 _hist 满（n=HIST_KEEP）
+    --   时会把第一个字整体跳过，导致以它开头的 5 字窗口（如「自动造词功」）丢失。
+    --   内层已有 len > MAX_PHRASE 的 break 兜底，无需再限制起点。
+    local start0 = 1
     for s = start0, n - 1 do
         local phrase = ""
         for k = s, n do
@@ -307,6 +346,10 @@ local function build_phrases(adds, exist, owner)
                         -- ★ 撞码抑制：该编码已被别的词条占用 ⇒ 造出来也永远召回不到（打出来的一定是对方），
                         --   只是白白占位的垃圾词，直接不造。
                         klog("auto_coined", "skip collide [" .. phrase .. "]=" .. code)
+                    elseif in_main_dict(phrase) then
+                        -- ★ v2.2 修复 A：主词典（ly_wubi.dict.yaml）已收录的词条不再造成临时词。
+                        --   否则会造成 ① 冗余占位 ② 与主词典重复候选 ③ 转正后冗余入库。
+                        klog("auto_coined", "skip main-dict [" .. phrase .. "]=" .. code)
                     else
                         exist[key] = true
                         owner[code] = true
@@ -340,7 +383,13 @@ local function on_commit(text, ts)
     end
     _last_ts = ts
 
-    _hist[#_hist + 1] = text
+    -- ★ 2026-10-30 修复「逐词上屏时跨界子词缺失」：把本次提交文本**按字**拆进 _hist。
+    --   旧实现整词作一个 _hist 元素，窗口只能以「词」为最小单位组合，被主词典过滤的
+    --   词（如「自动」「造词」「功能」）无法拆成字再与相邻字组成「词功能」「造词功」
+    --   「词功」等字级窗口（真机实测这些子词全部缺失）。
+    for _, ch in ipairs(split_chars(text)) do
+        _hist[#_hist + 1] = ch
+    end
     if #_hist > HIST_KEEP then
         local t = {}
         for i = #_hist - HIST_KEEP + 1, #_hist do t[#t + 1] = _hist[i] end
@@ -407,6 +456,68 @@ local function capture_pending(ctx, key)
     _pend_ts = os.time()
 end
 
+-- ---- 提交历史快照（size 是属性，back() 才取最近一条） ----
+local function snapshot_commit(ctx)
+    local size, bt = 0, nil
+    pcall(function() size = ctx.commit_history.size end)
+    pcall(function()
+        local b = ctx.commit_history:back()
+        if b then bt = b.text end
+    end)
+    return size, bt
+end
+
+-- ---- 结算一次新提交（按键兜底 与 update_notifier 两条路径共用） ----
+--   src="key"：P.func 按键路径兜底（数字选词 / 顶字上屏 / 自动上屏等非空格路径，
+--             提交发生在上一键，故这一键才看得到）
+--   src="ntf"：update_notifier（移动端**点候选栏** = 前端 Context::Select，提交后立即触发）
+--   两者共用 _last_size / _last_back，天然去重：同一次提交只结算一次。
+local function detect_and_settle(ctx, src)
+    local size, bt = snapshot_commit(ctx)
+    if not _primed then
+        -- 首次只记基线，不把历史提交当新提交
+        _primed, _last_back, _last_size = true, bt, size
+        return
+    end
+    local has_new = (size ~= _last_size) or (bt and bt ~= _last_back)
+    _last_back, _last_size = bt or _last_back, size
+    if has_new and bt then
+        local ts
+        if src == "ntf" then
+            ts = os.time()   -- notifier 在提交后立即触发，此刻时戳即提交时刻
+        else
+            -- 按键兜底路径：提交发生在「上一个正常编码键」，用 _pend_ts 更准；
+            -- 数字选词 / ; ' / 退格等非编码键会把 _pend_ts 清 0，此时退回 os.time()。
+            ts = (_pend_ts and _pend_ts > 0) and _pend_ts or os.time()
+        end
+        local ok, err = pcall(on_commit, bt, ts)
+        if not ok then klog("auto_coined", "on_commit error: " .. tostring(err)) end
+    end
+end
+
+-- ---- 连接 update_notifier（首次进入时；init 阶段 context 未就绪连了也不触发） ----
+--   ★ v2.2 修复 B 的关键：点候选栏**不产生按键事件**，只走 Context::Select →
+--     update_notifier。连上它，点选上屏当场结算、不再等下一次按键。
+--   只在开关开启时连接；回调里再查一次开关，避免关开关 / 切方案后仍结算。
+local function hook_notifier(env)
+    local ctx = env and env.engine and env.engine.context
+    if not ctx then return end
+    local sid = env.engine and env.engine.schema and env.engine.schema.schema_id
+    if _hooked and sid == _hooked_schema then return end
+    _hooked_schema = sid
+    pcall(function()
+        if ctx.update_notifier then
+            ctx.update_notifier:connect(function(c)
+                local on = false
+                pcall(function() on = c:get_option("auto_coined") end)
+                if not on then return end
+                pcall(detect_and_settle, c, "ntf")
+            end)
+        end
+    end)
+    _hooked = true
+end
+
 -- ---- 处理器：每个按键都跑；仅在开关开启且确有新提交时做事 ----
 local function P_func(key_event, env)
     if not env or not env.engine or not env.engine.context then return 2 end
@@ -417,19 +528,10 @@ local function P_func(key_event, env)
     pcall(function() on = ctx:get_option("auto_coined") end)
     if not on then return 2 end
 
+    -- 首次开启后连接 update_notifier（只在开关开时连，关时零开销）
+    hook_notifier(env)
+
     local input = ctx.input or ""
-
-    -- 提交历史：size 是「累计提交次数」，back().text 是「最近一次上屏的文本」。
-    local size, bt = 0, nil
-    pcall(function() size = ctx.commit_history.size end)
-    pcall(function()
-        local b = ctx.commit_history:back()
-        if b then bt = b.text end
-    end)
-    if not _primed then
-        _primed, _last_back, _last_size = true, bt, size
-    end
-
     local committed, ts = nil, 0
 
     -- Signal A（即时，主力）：空格键将上屏当前选中候选。
@@ -439,7 +541,6 @@ local function P_func(key_event, env)
     --   get_commit_text() 拿到「真正要上屏的字」。这里抓的是「空格按下时」的高亮候选
     --   （不是输入第一个编码时的高亮），所以简码打「二=fg」也能拿到「二」而非「地」——
     --   上一版「错字」的坑不会复发。
-    --   提交的文本仍与 commit_history 一致（真上屏账本），只是不再晚一拍。
     local kc = 0
     pcall(function() kc = key_event.keycode end)
     local is_space = (kc == 0x20) or (kc == 32)
@@ -452,31 +553,21 @@ local function P_func(key_event, env)
             if t and t ~= "" then
                 committed, ts = t, os.time()
                 -- 预登记：Submit_text 即将提交 t ⇒ commit_history 会 size+1、back 变 t。
-                -- 把 _last_* 提前拨到提交后的值，避免下一键的 Signal B 把这次提交重复读一遍。
-                _last_back, _last_size = t, size + 1
+                -- 把 _last_* 提前拨到提交后的值，避免紧随其后的 update_notifier /
+                -- 下一键的 detect_and_settle 把这次提交重复读一遍。
+                local size = 0
+                pcall(function() size = ctx.commit_history.size end)
+                _last_back, _last_size, _primed = t, size + 1, true
             end
         end
-    end
-
-    -- Signal B（兜底）：commit_history 变了（数字选词 / 顶字上屏 / 自动上屏等非空格路径）。
-    if not committed then
-        local has_new = (size ~= _last_size) or (bt and bt ~= _last_back)
-        if has_new and bt then
-            committed = bt
-            -- 时间戳：优先用「上一个正常编码键按下的时刻」（_pend_ts），
-            -- 数字选词 / ; ' / 退格等非编码键会把 _pend_ts 清 0，此时退回 os.time()。
-            if _pend_ts and _pend_ts > 0 then
-                ts = _pend_ts
-            else
-                ts = os.time()
-            end
-        end
-        _last_back, _last_size = bt or _last_back, size
     end
 
     if committed and committed ~= "" then
         local ok, err = pcall(on_commit, committed, ts)
         if not ok then klog("auto_coined", "on_commit error: " .. tostring(err)) end
+    else
+        -- Signal B（兜底，共用 detect_and_settle）：数字选词 / 顶字上屏 / 自动上屏等
+        detect_and_settle(ctx, "key")
     end
 
     pcall(capture_pending, ctx, key_event)
@@ -505,8 +596,14 @@ return {
 --   7. 关掉 auto_coined 开关 ⇒ 不再产生新自动词，已转正的永久词正常召回。
 --   8. 【验证 D·简码错字】用二级简码打「二」（码 fg，首码 f 高亮是「地」）上屏
 --      ⇒ 造进新词的必须是「二」而不是「地」；连打「二二」两个相同字也要各自入链。
+--   9. 【验证 E·主词典去重（v2.2）】连打「数据」「最好」等主词典已有词，
+--      ⇒ user_coined_auto.txt 里**不得**出现 数据/最好/造词/编辑 这类已有词；
+--        连打「万灵药」「有点卡」等新词 ⇒ 正常生成临时词。
+--  10. 【验证 F·点击候选栏上屏（v2.2）】打开开关，输入编码后**点候选栏**选词上屏
+--      （不是空格、不是数字键），连点两个词后停手 ⇒ 这两个点选的词都要入链、
+--        能造出相邻窗口词；点选某条带 ☯ 的临时词上屏 ⇒ 转正入手动词库。
 -- 排查：把本文件顶部 DEBUG_LOG 改成 true，重部署后 INFO 日志会打印每条提交的
---       （tick / 上屏文本 / 当前缓冲 / 造出的临时词 / 撞码跳过 / 词组边界重置）。
+--       （tick / 上屏文本 / 当前缓冲 / 造出的临时词 / 撞码跳过 / 主词典跳过 / 词组边界重置）。
 -- 回滚：删除 4 套 schema 里的 lua_processor@*auto_coined*P 一行与 auto_coined 开关，删除本文件；
 --       再撤销 Submit_text.lua 的 get_autophrase_path / UserCoined_AppendManual / temp 相关改动。
 -- ============================================================================

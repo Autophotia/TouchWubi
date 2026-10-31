@@ -60,6 +60,7 @@ sequence_*.txt
 /space/schemas/bim-pinyin/
 /space/schemas/bim-wubi/
 /space/schemas/sbsrf/
+/space/schemas/方案1/
 
 # ── tools 下的生成产物（脚本保留，产物不入库）──
 /tools/assoc_fixed_supplement.txt

@@ -609,7 +609,12 @@ local function filter(input, env)
     if spelling_states then
         log_debug("Explicit radical mode")
         for cand in input:iter() do
-            if pass_gb2312_filter(cand, env) then
+            -- ★ 2026-10-31 修复：自造词（type=user_coined）候选的 comment 是「编码☯」，
+            --   加字根/拼音注解会覆盖编码 ⇒ 下游 wubi_pinyin_filter 取不到编码而丢弃，
+            --   表现为「手动造词/自动造词保存了却打不出来」。这类候选原样放行，不做注解。
+            if cand.type == "user_coined" then
+                yield(cand)
+            elseif pass_gb2312_filter(cand, env) then
                 -- 不含汉字的候选项（如日程命令、统计数字）直接输出
                 if env.is_mixed and not has_chinese(cand.text) then
                     yield(cand)
@@ -763,6 +768,12 @@ local function filter(input, env)
             local annotate_n = 0
             local annotate_limit = env.annotate_limit
             for cand in input:iter() do
+                -- ★ 2026-10-31 修复：自造词（type=user_coined）候选原样放行，不做注解、
+                --   不占注解名额 —— comment 保留「编码☯」供 wubi_pinyin_filter 匹配编码。
+                if cand.type == "user_coined" then
+                    yield(cand)
+                    goto annotate_skip
+                end
                 annotate_n = annotate_n + 1
                 if annotate_n > annotate_limit then
                     if pass_gb2312_filter(cand, env) then

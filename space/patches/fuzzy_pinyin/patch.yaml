@@ -28,7 +28,7 @@ patch:
     patch:
       "speller/algebra/0+":
         - "derive/^([z])h/$1/"
-        - "derive/^([z])([^h])/$1h$2/"
+        - "derive/^([z])([^g])/$1h$2/"
   - title: "k = g"
     key: "k = g"
     patch_to: "{$current_schema}"

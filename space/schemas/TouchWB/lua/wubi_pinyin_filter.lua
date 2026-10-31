@@ -693,8 +693,51 @@ local function filter(input, env)
 
     if input_str:find("[`']") or sanitized_input:find("[^%a]") then
         if pure_code_len == 0 then
+            -- ★ 2026-10-31 v2.16：纯反引号/撇号/空格（无任何编码字母）不吐候选。
+            --   这是「长按Z再按空格=结束造词」的信号态：候选栏必须为空，
+            --   否则 mkst(enable_completion:true) 会吐「的、一、是、我」等单字，
+            --   按空格就上屏第一候选、破坏结束键（真机 v2.15 实测）。
+            --   只对「仅由 ` ' 空格组成」的输入清空；计算器（=1+1）等含数字/运算符
+            --   的纯符号输入不在此列，照旧 yield 交给对应翻译器，避免误伤。
+            if input_str:match("^[`' ]*$") then
+                return
+            end
             for cand in input:iter() do
                 yield(cand)
+            end
+            return
+        end
+        -- ★ 2026-10-31 反引号段第 5 码 = 拼音首字母筛选（前 4 码五笔 + 第 5 码拼音首字母），
+        --   与普通输入的第 5 码语义一致（见下方 pure_code_len==5 分支）。
+        --   手动造词反引号段同样适用：`rtfcs = 手动(rtfc) + s(拼音首字母) 筛重码。
+        --   旧逻辑把 5 位全当五笔逐位匹配，而候选编码最多 4 位 ⇒ 第 5 位永远匹配不上、
+        --   所有候选被误杀（真机「手动造词第五码被当五笔编码而非拼音」根因）。
+        if pure_code_len == 5 then
+            local pinyin_filter = pure_code:sub(5,5):lower()
+            local pinyin_filters = build_pinyin_filter_set(pinyin_filter, env.left_to_right, env.use_key_pairs)
+            -- ★ 2026-10-31 v2.16：反引号段第 5 码的候选，其五笔匹配只吃掉前 4 码（`ruuj），
+            --   第 5 码 d 不在候选 span 内 ⇒ 点选后引擎提交「接单」却把 d 残留回编码栏（「接单d」）。
+            --   克隆候选、把 span 拉满到整串输入（含反引号），让第 5 码一并被消费，点选正常上屏。
+            local full_len = #input_str
+            for cand in input:iter() do
+                -- 前 4 码按五笔逐位匹配，第 5 码按拼音首字母筛选
+                if not matches_prefix(cand, pure_code, 4, env.use_key_pairs, env.left_to_right, env.spll_rvdb, env.use_last_char) then
+                    goto continue_backtick5
+                end
+                local target_char = get_target_char(cand, env.use_last_char)
+                if target_char then
+                    local initials = get_pinyin_initials(target_char, env.spll_rvdb)
+                    if initials_hit(initials, pinyin_filters) then
+                        local orig_start = tonumber(cand.start) or 0
+                        local orig_end = tonumber(cand._end) or cand._end
+                        if orig_start ~= 0 or orig_end ~= full_len then
+                            yield(clone_candidate(cand, 0, full_len, cand.preedit))
+                        else
+                            yield(cand)
+                        end
+                    end
+                end
+                ::continue_backtick5::
             end
             return
         end
