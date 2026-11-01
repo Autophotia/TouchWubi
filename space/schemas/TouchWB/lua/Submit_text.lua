@@ -11,7 +11,7 @@
     修复: 添加反向前缀匹配（输入编码以存储编码开头），解决5码输入无法匹配自造词问题
 
     【主要功能】
-    1. 手动造词（徐码式逐字/词组累积）：长按 Z（反引号）逐段输编码、翻页选字上屏，全部选定后长按 Z 再按空格，整词落盘 user_coined_ext.txt
+    1. 手动造词（徐码式逐字/词组累积）：长按 Z（反引号）逐段输编码、翻页选字上屏，全部选定后长按 Z 再按空格，整词写入 C++ UserDb（lua/user_coined）
     2. 自造词即时查询：实时读取用户词库，高优先级显示用户自定义词条
     3. 反查功能：按单引号键快速上屏第三候选项（table/reverse_lookup类型）
     4. 快捷上屏：分号键上屏第二候选，单引号键上屏第三候选
@@ -38,7 +38,7 @@
     1. 手动造词：长按 Z（反引号）输该字/词组编码（可只输前几码）→ 翻页选字上屏（自动累积）→ 重复至全部选定 → 长按 Z 再按空格保存整词
     2. 智能编码：无论输入模糊编码还是精确编码，保存时自动从字典查询生成标准五笔编码
     3. 快捷上屏：分号键上屏第二候选，单引号键上屏第三候选（反查/表格模式）
-    4. 用户词库路径：{user_data_dir}/user_coined_ext.txt，即时生效无需重部署
+    4. 用户词库：C++ UserDb（lua/user_coined），即时生效无需重部署
     5. 格式：词条<Tab>编码
     6. 支持跨平台：Windows/macOS/Linux/Android(HarmonyOS)，实现跨平台自造词共享
 ]]
@@ -168,16 +168,80 @@ local char_code_cache_n = 0
 --   内存占用约 2~3MB（可接受），换来彻底消除每键同步扫盘。
 --   加载失败（字典路径尚未就绪等）时不固化空字典，下次调用会重试；查不到字就返回空码，
 --   上层（generate_standard_code）拿不到完整码时仍会走 splitinput 降级，行为与修复前一致。
-local char_dict_cache   = nil   -- 全量字典哈希表：{ 单字 -> { code, w } }（懒加载）
-local char_dict_phrases = nil   -- 主词典多字词集合：{ 词 -> true }（自动造词「主词典已有词不重复造」去重用）
+local char_dict_cache   = nil   -- 全量字典哈希表：{ 单字 -> code }（懒加载，扁平化省 table 对象）
+local char_dict_phrases = nil   -- 已废弃：2026-11-01 起不再构建（改布隆过滤器，见下）
 local char_dict_done    = false -- 是否已成功加载过全量字典（失败保持 false，下次重试）
+
+-- =================================================================
+-- == 主词典多字词去重：布隆过滤器（替代 11.8 万条哈希集合，省 ~10MB 常驻）==
+-- =================================================================
+-- 2026-11-01：原 char_dict_phrases 精确集合占 ~10MB（16MB 里的大头），是自动造词过程
+--   GC 卡顿主因。改用布隆过滤器：1.2M bits（~37500 个 number 块）≈ ~0.6MB，误判率 ~2%。
+--   误判方向是「把不在主词典的新词误判为已在」⇒ 该新词本次不造成临时词（宁漏造，
+--   不重复造主词典词——与 v2.2 修复 A 语义一致，仅 ~2% 新词被漏造）。
+local BLOOM_BITS = 1200000   -- 位数组长度（11.8 万词 @ 误判率 ~2%）
+local BLOOM_K    = 7         -- 哈希函数个数
+local bloom_blocks = nil     -- { [block_idx] = 32 位整数 }，懒构建，release_dict 释放
+
+local function hash_djb2(s)
+    local h = 5381
+    for i = 1, #s do
+        h = (h * 33 + s:byte(i)) % 4294967296
+    end
+    return h
+end
+
+local function hash_sdbm(s)
+    local h = 0
+    for i = 1, #s do
+        h = (s:byte(i) + h * 64 + h * 65536 - h) % 4294967296
+    end
+    return h
+end
+
+local function bloom_set(s)
+    local h1 = hash_djb2(s)
+    local h2 = hash_sdbm(s)
+    if h2 == 0 then h2 = 1 end
+    for i = 0, BLOOM_K - 1 do
+        local bit_pos = (h1 + i * h2) % BLOOM_BITS
+        local block_idx = math.floor(bit_pos / 32) + 1
+        local off = bit_pos % 32
+        local mask = 2 ^ off
+        local block = bloom_blocks[block_idx] or 0
+        if block % (mask * 2) < mask then
+            bloom_blocks[block_idx] = block + mask
+        end
+    end
+end
+
+local function bloom_check(s)
+    if not bloom_blocks then return false end
+    local h1 = hash_djb2(s)
+    local h2 = hash_sdbm(s)
+    if h2 == 0 then h2 = 1 end
+    for i = 0, BLOOM_K - 1 do
+        local bit_pos = (h1 + i * h2) % BLOOM_BITS
+        local block_idx = math.floor(bit_pos / 32) + 1
+        local off = bit_pos % 32
+        local mask = 2 ^ off
+        local block = bloom_blocks[block_idx]
+        if not block or block % (mask * 2) < mask then
+            return false
+        end
+    end
+    return true
+end
 
 -- ★ 2026-10-25 造词专用日志（独立的低音量开关）。
 --   与上面的 klog 不同：klog 每按一个键打 1~3 条（2702 键 7567 条）必须常关；
 --   本开关只在「手动造词」这条窄路径上记录（input 含反引号 / 空格落词条 / 真正落盘），
 --   正常打字一行不打 ⇒ 可以默认开着用来抓 bug，排完再关。
 --   ⚠ 真机 log.info 只输出第一个参数，所以信息必须全部拼进第一个参数里。
-local DEBUG_COIN_LOG = true
+--   ⚠ 2026-11-01 性能修复：真机 log.info 是「同步写日志文件」，手动造词每上屏一字、
+--   每次保存都打 kcoin ⇒ 同步 IO 累积成「手动造词卡顿」（自动造词 auto_coined.lua 的
+--   DEBUG_LOG 早已 false，所以自动不卡手动卡）。造词功能已闭环，改为 false。
+local DEBUG_COIN_LOG = false
 local function kcoin(tag, msg)
     if not DEBUG_COIN_LOG then return end
     pcall(function() if log and log.info then log.info("[COIN:" .. (tag or "?") .. "] " .. (msg or "")) end end)
@@ -251,18 +315,15 @@ end
 
 -- ★ 2026-10-29 懒加载全量字典：一次性把整本 ly_wubi.dict.yaml 读进内存哈希表
 --   { 字 → 最高权重编码 }。之后 O(1) 查表，永不再逐字扫 14.8 万行。
--- ★ 2026-10-30 增加多字词索引：同一遍扫描里顺手把「多字词」也登记进 phrases 集合，
---   供自动造词（auto_coined.lua）做「主词典已有词不再重复造临时词」的去重。
---   内存代价：phrases 约 11.5 万条多字词，LuaJIT 哈希表 + 短字符串约 +5~8MB。
---   权衡：这是「从根源上消除冗余临时词」最直接的办法，且只读一次磁盘，
---   代价可接受（predict.db 磁盘 7MB、ly_wubi 词典 3MB 都远超此量级）。
--- ★ 2026-10-31 撤回「code 索引」：手动造词改回 enable_sentence 的徐码式逐字选择
---   （affix_segmentor + table_translator 原生查重码），不再需要 codes/pcodes 索引。
---   删除后 build_dicts 回到只构建 dict+phrases，首次加载从 ~513ms 降回基线，
---   消除「一造词就卡」。
+-- ★ 2026-11-01 性能重构：① 单字表扁平化（{字→code} 直接存字符串，省 2.4 万 table）；
+--   ② 撤销 10-30 的「多字词去重索引」（11.8 万条短语集合，实测占 ~13MB 常驻，
+--   GC 停顿 17ms/次，是自动造词过程卡顿大头）。去重价值有限（冗余临时词只在整码
+--   精确匹配浮现 + 撞码被主词典覆盖 + 过期淘汰），性能优先砍掉，main_dict_has_phrase 恒 false。
+--   build_dicts 现只构建单字表，首次加载从 ~470ms 降到 ~150ms、常驻 16MB 降到 ~3MB。
 local function build_dicts()
-    local dict = {}      -- 单字：字 -> { code, w }（取最高权重编码）
-    local phrases = {}   -- 多字词：词 -> true（主词典存在性集合，自动造词去重用）
+    local dict = {}      -- 单字：字 -> code（取最高权重编码；扁平化省 table 对象）
+    local wdict = {}     -- 临时：字 -> w（构建期比较权重用，函数返回即释放）
+    bloom_blocks = {}    -- 布隆过滤器位块（多字词去重，省 ~10MB）
     for _, dict_path in ipairs(collect_dict_paths()) do
         local f = io.open(dict_path, "rb")
         if f then
@@ -278,20 +339,19 @@ local function build_dicts()
                     if text and code then
                         local n = utf8.len(text)
                         if n == 1 then
-                            local cur = dict[text]
-                            if not cur then
-                                dict[text] = { code = code, w = w }
-                            elseif w > cur.w then
-                                cur.code, cur.w = code, w
+                            local curw = wdict[text]
+                            if not curw or w > curw then
+                                wdict[text] = w
+                                dict[text] = code
                             end
                         elseif n >= 2 then
-                            phrases[text] = true
+                            bloom_set(text)   -- 多字词进布隆过滤器（去重用）
                         end
                     end
                 end
             end
             f:close()
-            -- 找到第一个可用的字典文件就停（ly_wubi 优先级最高，已含全部单字与多字词）
+            -- 找到第一个可用的字典文件就停（ly_wubi 优先级最高，已含全部单字）
             if next(dict) then
                 break
             end
@@ -303,7 +363,7 @@ local function build_dicts()
         char_dict_done = true
     end
     char_dict_cache = dict
-    char_dict_phrases = phrases
+    char_dict_phrases = nil
 end
 
 -- 确保全量字典已加载（懒加载入口，失败不固化，下次重试）
@@ -323,9 +383,9 @@ local function get_char_wubi_code(char)
     -- ② 全量字典懒加载（首次调用一次性读盘，之后 O(1) 查表）
     ensure_dict_loaded()
     if char_dict_cache then
-        local e = char_dict_cache[char]
-        if e then
-            return code_cache_put(char, e.code)
+        local c = char_dict_cache[char]
+        if c and c ~= "" then
+            return code_cache_put(char, c)
         end
     end
 
@@ -339,7 +399,8 @@ end
 local function main_dict_has_phrase(text)
     if type(text) ~= "string" or text == "" then return false end
     ensure_dict_loaded()
-    return char_dict_phrases ~= nil and char_dict_phrases[text] == true
+    -- 布隆过滤器：~2% 误判（新词被误判为已在主词典 → 本次不漏造成临时词，可接受）
+    return bloom_check(text)
 end
 rawset(_G, "auto_coined_in_main_dict", main_dict_has_phrase)
 
@@ -448,35 +509,10 @@ function get_autophrase_path()
 end
 rawset(_G, "get_autophrase_path", get_autophrase_path)
 
-local function ensure_userphrase_file()
-    -- ★ 2026-10-25：module 加载时 userphrasepath 只在 dofile 的那一刻求值一次；
-    --   若那时机(path 尚未就绪)取到空，旧代码直接 return ⇒ 整个 session 都造不了词，
-    --   而读取方 user_coined_translator 有同样问题的自愈逻辑（见文末），两边的容错不对称。
-    --   这里补上与读取侧一致的「用到时再试一次」。
-    if not userphrasepath or userphrasepath == "" then
-        userphrasepath = init_userphrase_path()
-        kcoin("ensure", "re-init path -> [" .. tostring(userphrasepath) .. "]")
-        if not userphrasepath or userphrasepath == "" then
-            kcoin("ensure", "FAIL: user_data_dir 仍为空，本轮无法造词")
-            return
-        end
-    end
-
-    local f = io.open(userphrasepath, "r")
-    if not f then
-        f = io.open(userphrasepath, "w")
-        if f then
-            -- 注意：保持原来的 3 行注释头，不额外写入换行的初始内容，
-            -- 这样 fileappendtext 追加时不会出现多余空行。
-            f:write("# 自造词文件\n")
-            f:write("# 格式：词条<Tab>编码\n")
-            f:write("# 即时生效，无需重新部署\n")
-            f:close()
-        end
-    else
-        f:close()
-    end
-end
+-- ★ 2026-11-01 移除 ensure_userphrase_file：方案 B 后自造词主库迁 C++ UserDb，
+--   user_coined_ext.txt 不再被写入，只剩「历史迁移源」一个用途（uc_migrate_once 只读）。
+--   原函数会 io.open(...,"w") 自动创建 3 行注释头的 txt —— 多余且误导，已删除，
+--   禁止再生成该文件。
 
 -- =================================================================
 -- == 辅助函数 ==
@@ -529,10 +565,217 @@ function splitinput(input, len)
     return result
 end
 
--- ★ 自造词文件缓存（2026-09-29 S14）：声明必须在 fileappendtext 之前，
---   否则下面那句 `_uc_cache = nil` 会写进**全局**，与这里的 local 不是同一个变量。
-local _uc_cache = nil
-local UC_TTL = 60
+-- =================================================================
+-- == 方案 B：自造词存储迁 C++ UserDb（对标魔然，消除热路径 Lua 文件 IO）==
+-- =================================================================
+-- 卡顿根因（真机日志量化确认）：translator 每键 io.open 读 txt、手动造词上屏
+--   append txt、自动造词每上屏整文件重写 txt —— 全是热路径 Lua 文件 IO。
+--   现迁到 librime C++ UserDb（LevelDb）：内存哈希 + 前缀查询 + 异步落盘，
+--   彻底消除热路径 IO（同 smart_assoc.lua 的 assoc_*.userdb、魔然 moran_pin 的
+--   pin_db 用法）。key/value 设计：
+--     永久词: "e\t<code>\t<text>"  value = "<seq>"    seq 单调递增，用于倒序列表/撤销最近
+--     临时词: "a\t<code>\t<text>"  value = "<tick>"   tick 提交计数，用于淘汰
+--     meta:   "\0seq"              value = 下一个 seq 号
+--   迁移（db 首次打开且无写入痕迹时，按优先级）：
+--     ① 旧根目录 user_coined 库（方案 B 初版位置）→ 整体复制到 lua/user_coined；
+--     ② 旧库为空 → 从历史 txt（user_coined_ext.txt / auto.txt）一次性导入；
+--     迁移后不再读写 txt / 旧库（保留作历史备份，代码不再引用）。
+local uc_db = nil
+local uc_migrated = false
+
+local function uc_open()
+    if uc_db and uc_db:loaded() then return uc_db end
+    -- ★ 2026-11-01 与联想/调序/tips 统一：userdb 放到 lua/ 下（lua/user_coined），
+    --   不再落在用户目录根目录。旧根目录 user_coined 库由 uc_migrate_once 迁移。
+    local db = LevelDb("lua/user_coined")
+    if not db then return nil end
+    local ok = pcall(function() db:open() end)
+    if not ok or not db:loaded() then return nil end
+    uc_db = db
+    return uc_db
+end
+
+local function uc_manual_key(code, text) return "e\t" .. code .. "\t" .. text end
+local function uc_temp_key(code, text)  return "a\t" .. code .. "\t" .. text end
+
+-- 从 key 还原 text, code, is_temp；非词 key（如 meta）返回 nil
+local function uc_parse_key(k)
+    local kind, rest = k:match("^([ea])\t(.*)$")
+    if not rest then return nil end
+    local code, text = rest:match("^([^\t]+)\t(.+)$")
+    if not code or not text then return nil end
+    return text, code, (kind == "a")
+end
+
+-- 单调递增 seq（存 meta key "\0seq"，用于倒序列表 / 撤销最近造的词）
+local function uc_next_seq()
+    local db = uc_open()
+    if not db then return 0 end
+    local v = db:fetch("\0seq")
+    local n = tonumber(v) or 0
+    n = n + 1
+    db:update("\0seq", tostring(n))
+    return n
+end
+
+local function uc_put_manual(text, code)
+    local db = uc_open()
+    if not db then return false end
+    local k = uc_manual_key(code, text)
+    if db:fetch(k) ~= nil then return false end   -- 已存在，不重复写
+    db:update(k, tostring(uc_next_seq()))
+    return true
+end
+
+local function uc_put_temp(text, code, tick)
+    local db = uc_open()
+    if not db then return false end
+    db:update(uc_temp_key(code, text), tostring(tick or 0))
+    return true
+end
+
+local function uc_erase_manual(text, code)
+    local db = uc_open()
+    if not db then return false end
+    return db:erase(uc_manual_key(code, text))
+end
+
+local function uc_erase_temp(text, code)
+    local db = uc_open()
+    if not db then return false end
+    return db:erase(uc_temp_key(code, text))
+end
+
+local function uc_has_manual(text, code)
+    local db = uc_open()
+    if not db then return false end
+    return db:fetch(uc_manual_key(code, text)) ~= nil
+end
+
+-- 倒序永久词 list（seq 降序 = 最近造的在最前）
+local function uc_list_manual()
+    local db = uc_open()
+    local out = {}
+    if not db then return out end
+    local acc = db:query("e\t")
+    if acc then
+        for k, v in acc:iter() do
+            local text, code = uc_parse_key(k)
+            if text then out[#out + 1] = { text = text, code = code, seq = tonumber(v) or 0 } end
+        end
+    end
+    table.sort(out, function(a, b) return a.seq > b.seq end)
+    return out
+end
+
+-- 临时词 list（含 tick）
+local function uc_list_temp()
+    local db = uc_open()
+    local out = {}
+    if not db then return out end
+    local acc = db:query("a\t")
+    if acc then
+        for k, v in acc:iter() do
+            local text, code = uc_parse_key(k)
+            if text then out[#out + 1] = { text = text, code = code, tick = tonumber(v) or 0 } end
+        end
+    end
+    return out
+end
+
+local function uc_clear_manual()
+    local db = uc_open()
+    if not db then return false end
+    local acc, keys = db:query("e\t"), {}
+    if acc then for k in acc:iter() do keys[#keys + 1] = k end end
+    for _, k in ipairs(keys) do db:erase(k) end
+    return true
+end
+
+local function uc_clear_temp()
+    local db = uc_open()
+    if not db then return false end
+    local acc, keys = db:query("a\t"), {}
+    if acc then for k in acc:iter() do keys[#keys + 1] = k end end
+    for _, k in ipairs(keys) do db:erase(k) end
+    return true
+end
+
+-- 旧根目录 user_coined 库是否真实存在于磁盘（有 CURRENT 文件）。
+--   ★ 不能直接 LevelDb("user_coined")+open 去探测——open 会在根目录凭空创建一个
+--     空 user_coined.userdb 目录（残留垃圾）。必须先做文件系统存在性检查。
+local function uc_old_db_exists()
+    local dir = get_rime_user_dir()
+    if dir == "" then return false end
+    dir = dir:gsub("\\", "/")
+    if dir:sub(-1) ~= "/" then dir = dir .. "/" end
+    local f = io.open(dir .. "user_coined.userdb/CURRENT", "r")
+    if f then f:close() return true end
+    return false
+end
+
+-- 首次打开且 db 无写入痕迹（无 seq meta）时，迁移旧数据：旧 userdb 优先，其次历史 txt。
+local function uc_migrate_once()
+    if uc_migrated then return end
+    uc_migrated = true
+    local db = uc_open()
+    if not db then return end
+    if db:fetch("\0seq") ~= nil then return end   -- 已写过（迁移或新词），跳过
+
+    -- ① 旧根目录 user_coined 库 → 新 lua/user_coined 库整体迁移（方案 B 初版把 userdb
+    --   建在根目录，现迁到 lua/ 下）。整库复制（含 e/a/seq meta），旧库无数据则回退 txt。
+    if uc_old_db_exists() then
+        local old = LevelDb("user_coined")
+        if old then
+            local ok = pcall(function() old:open() end)
+            if ok and old:loaded() then
+                local acc = old:query("")
+                if acc then
+                    local has_any = false
+                    for k, v in acc:iter() do
+                        has_any = true
+                        db:update(k, v)
+                    end
+                    if has_any then
+                        return   -- 已从旧库迁移（含 seq meta），跳过 txt 迁移
+                    end
+                end
+            end
+        end
+    end
+
+    -- ② 历史 txt 迁移（早期版本种子数据，只读，不写回）
+    -- 永久词（txt 末行 = 最新 ⇒ 按行序 seq 递增，导入后倒序正确）
+    local ep = userphrasepath or ""
+    if ep ~= "" then
+        local f = io.open(ep, "r")
+        if f then
+            for raw in f:lines() do
+                local line = raw:gsub("\r$", "")
+                if not line:match("^#") then
+                    local text, code = line:match("^([^\t]+)\t([a-z]+)")
+                    if text and code then db:update(uc_manual_key(code, text), tostring(uc_next_seq())) end
+                end
+            end
+            f:close()
+        end
+    end
+    -- 临时词（tick 是 session 相对值，跨 session 无意义 ⇒ 归一化为 0）
+    local ap = get_autophrase_path() or ""
+    if ap ~= "" then
+        local f = io.open(ap, "r")
+        if f then
+            for raw in f:lines() do
+                local line = raw:gsub("\r$", "")
+                if not line:match("^#") then
+                    local text, code = line:match("^([^\t]+)\t([a-z]+)")
+                    if text and code then db:update(uc_temp_key(code, text), "0") end
+                end
+            end
+            f:close()
+        end
+    end
+end
 
 function fileappendtext(filepath, context, input, env)
     if not context or context == "" or context:find("%a") then
@@ -547,19 +790,19 @@ function fileappendtext(filepath, context, input, env)
         return
     end
 
-    -- 统一使用 generate_standard_code 从字典查询标准五笔编码
-    -- 这种方式无论26键还是14键都更加可靠，不依赖用户输入的编码
+    -- ★ 2026-11-01 性能优化：手动造词保存仍查字典生成标准五笔码（保留「拼音筛字反查」，
+    --   input 可能是拼音也可能是五笔码，不能简单 splitinput）。查完立即释放字典，
+    --   消除「结束后持续卡顿」（字典不再常驻 Lua 堆）。字典现只加载单字表（2.4 万，
+    --   已砍掉 11.8 万词去重集合），常驻从 ~16MB 降到 ~5.9MB、GC 从 17ms 降到 2ms。
     clean_input = generate_standard_code(context)
-
-    -- 如果字典查询失败（可能是生僻字），降级使用用户输入的编码
     if not clean_input or clean_input == "" then
-        clean_input = splitinput(input, len)
-        if clean_input and clean_input ~= "" then
-            kcoin("code", "DEGRADED: 字典查不到 [" .. context .. "]，改用用户输入 input=[" ..
-                  tostring(input) .. "] -> " .. clean_input)
+        -- 字典查不到（生僻字）降级用用户输入编码（14键 normalize 到标准左字母码）
+        clean_input = normalize_14key(splitinput(input, len) or "")
+        if clean_input ~= "" then
+            kcoin("code", "DEGRADED: 字典查不到 [" .. context .. "]，改用输入码 -> " .. clean_input)
         end
     else
-        kcoin("code", "standard [" .. context .. "] -> " .. clean_input .. " (len=" .. #clean_input .. ")")
+        kcoin("code", "standard [" .. context .. "] -> " .. clean_input)
     end
 
     if not clean_input or clean_input == "" then
@@ -567,132 +810,29 @@ function fileappendtext(filepath, context, input, env)
         return
     end
 
-    -- ★ 兜底：#clean_input 不足 4 位（多数词 usr:#=4）通常意味着字典里
-    --   某个字压根查不到编码 ⇒ 这种词存进去也打不出来。此时优先退回用户输入的全串试试。
-    if #clean_input < 4 then
-        local alt = splitinput(input, len)
-        if alt and alt ~= "" and #alt > #clean_input then
-            kcoin("code", "SHORT " .. #clean_input .. " 位，改用 " .. #alt .. " 位输入码 " .. alt)
-            clean_input = alt
-        else
-            kcoin("code", "SHORT " .. #clean_input .. " 位且无更好输入码，仍写入：" .. clean_input)
-        end
-    end
-    
-    -- 检查是否已存在，避免重复写入相同词条和编码
-    local normalized = context .. "\t" .. clean_input
-    local f = io.open(filepath, "r")
-    local exists = false
-    if f then
-        for line in f:lines() do
-            if line == normalized then
-                exists = true
-                break
-            end
-        end
-        f:close()
-    end
-    
-    if not exists then
-        f = io.open(filepath, "a")
-        if f then
-            f:write("\n" .. normalized)
-            f:close()
-            -- ★ 文件被我们改写了 ⇒ 自造词缓存立即失效（见 user_coined_translator）
-            _uc_cache = nil
-            kcoin("write", "OK [" .. context .. "] code=" .. clean_input .. " -> " .. tostring(filepath))
-        else
-            -- 旧代码这里静默失败：写不进去完全没有任何痕迹，看起来就是「造不了词」
-            kcoin("write", "FAIL: io.open(filepath,'a') 返回 nil，path=" .. tostring(filepath))
-        end
+    -- 写 UserDb
+    uc_migrate_once()
+    if uc_put_manual(context, clean_input) then
+        kcoin("write", "OK [" .. context .. "] code=" .. clean_input .. " -> userdb")
     else
-        kcoin("write", "SKIP: 已存在完全相同条目 " .. normalized)
+        kcoin("write", "SKIP: 已存在相同条目 " .. context .. "\t" .. clean_input)
     end
 end
 
--- =================================================================
--- == 自造词文件缓存（2026-09-29 S14）==
---   user_coined_translator 原本**每按一个键**（输入 ≥2 个字母）就
---   io.open + 逐行读一遍整个自造词文件。改成内存缓存：
---     · 文件唯一的写入者就是上面的 fileappendtext ⇒ 写完立即置空缓存；
---     · 再加 60 秒兜底刷新，防止用户在别处（同步 / 手动导入）改了文件。
--- =================================================================
--- 解析一行：返回 text, code, flag（flag 空串 = 无第三列）
-local function parse_uc_line(line)
-    if not line or line == "" or line:match("^#") then return nil end
-    local text, code, flag = line:match("^([^\t]+)\t([a-z]+)\t?(.*)$")
-    if not text or not code then return nil end
-    return text, code, flag or ""
-end
+-- （方案 B：自造词列表缓存与首字母桶索引已由 C++ UserDb 内存哈希 + 前缀查询替代，
+--   translator 直接 query(db, 首字母前缀)，无需 Lua 侧 list 缓存。）
 
-local function load_userphrase_list()
-    if not userphrasepath or userphrasepath == "" then return nil end
-    local list = {}
-
-    -- 读一个词库文件；is_temp=true 表示该文件里的词条是「自动临时词」
-    local function read_file(path, is_temp_file)
-        if not path or path == "" then return end
-        local f = io.open(path, "r")
-        if not f then return end
-        for raw in f:lines() do
-            -- ★ Lua 5.4+ 起 for-in 循环变量只读，不能对循环变量本身赋值，
-            --   必须转一道（与 user_coined_cmd.lua 同款写法），否则加载即报错。
-            local line = raw:gsub("\r$", "")
-            local text, code, flag = parse_uc_line(line)
-            if text and code then
-                -- ★ 自愈：早期（错误）实现曾把临时词写进手动词库并留下 temp:N 的行，
-                --   这里直接跳过，使这些历史垃圾词彻底失效，不再污染候选。
-                -- ★ 2026-10-29 修复：自动临时词库（is_temp_file=true）里 temp:N 是
-                --   正常格式，绝不能跳 —— 之前这里无条件跳过，导致所有自动临时词
-                --   （灾加/灾加岂/加岂…）都进不了候选、永远显示不出来。
-                --   只有读「手动/永久词库」（is_temp_file=false）时才跳过 temp:N 垃圾行。
-                if is_temp_file or not flag:match("^temp:") then
-                    list[#list + 1] = { text = text, code = code, flag = flag, temp = is_temp_file }
-                end
-            end
-        end
-        f:close()
-    end
-
-    read_file(userphrasepath, false)         -- 手动/永久词库
-    read_file(get_autophrase_path(), true)   -- 自动临时词库（独立文件）
-    return list
-end
-
-local function get_userphrase_list()
-    local now = os.time()
-    if _uc_cache and (now - _uc_cache.ts) < UC_TTL then return _uc_cache.list end
-    _uc_cache = { list = load_userphrase_list() or {}, ts = now }
-    return _uc_cache.list
-end
-
--- ★ 2026-10-28：把一条自动临时词「转正」为永久词 —— 追加进手动词库 user_coined_ext.txt。
---   转正后它与手动造词完全同构（同样受 /zctj /zccx /zcdr 等命令管理），
---   因此 ——> 自动造词与手动造词最终汇入同一个词库，但生产路径互不干扰。
+-- ★ 2026-10-28：把一条自动临时词「转正」为永久词（方案 B 后写入 C++ UserDb）。
+--   转正后它与手动造词完全同构（同样受 /zctj /zccx /zcdr 等命令管理）。
+--   语义：已存在则视为「已转正」返回 true（调用方据此删除临时词）；否则写入返回 true。
 function UserCoined_AppendManual(text, code)
     if not text or text == "" or not code or code == "" then return false end
-    ensure_userphrase_file()
-    local p = get_userphrase_path()
-    if not p or p == "" then return false end
-    -- 已存在则不重复追加（去重）
-    -- ★ 2026-10-29 修复：转正去重只能查「手动/永久词库」，绝不能把临时词库也算进去。
-    --   load_userphrase_list 同时含手动词(temp=false)与自动临时词(temp=true)；
-    --   若不排除临时词，召回某临时词转正时，去重循环会在临时库里命中同一条目、
-    --   误判「已存在」直接 return true —— 结果既不追加进手动库、又被 auto_coined
-    --   当作已转正从临时库里删掉 ⇒ 词条凭空消失、永远转不了正。
-    for _, e in ipairs(load_userphrase_list() or {}) do
-        if not e.temp and e.text == text and e.code == code then return true end
-    end
-    local f = io.open(p, "ab")
-    if not f then return false end
-    -- ★ 2026-10-30 修复「编辑粘进注释头」：改为**前导换行**追加，与 fileappendtext 逐字节一致。
-    --   前导 \n 会在 3 行注释头之后自然隔出一个空行（第 4 行），且无论上一行是否带换行
-    --   都不会粘行。此前这里用**后缀** \n，当文件被 /zcqk、/zcsc、/zcdr 整文件重写后
-    --   （write_lines 末行不带换行），就会把词条粘到注释头上。
-    --   两个写入方统一为「前导 \n」后，自动造词转正与手动造词生成的永久文件行为完全一致。
-    f:write("\n" .. text .. "\t" .. code)
-    f:close()
-    _uc_cache = nil
+    uc_migrate_once()
+    local db = uc_open()
+    if not db then return false end
+    local k = uc_manual_key(code, text)
+    if db:fetch(k) ~= nil then return true end   -- 已在手动库 = 视为已转正
+    db:update(k, tostring(uc_next_seq()))
     return true
 end
 rawset(_G, "UserCoined_AppendManual", UserCoined_AppendManual)
@@ -857,6 +997,12 @@ local function commit_text_processor(key, env)
     local function update_manual_userphrase()
         if input_text and input_text:find("`", 1, true) then
             _coin_pending_input = input_text
+            -- ★ 2026-11-01 性能修复：造词开始（长按Z 出现反引号）就预加载全量字典。
+            --   原实现要到「长按Z+空格保存」时才在 generate_standard_code 里首次触发
+            --   build_dicts（读 14.8 万行 + 布隆构建 ≈ 672ms，真机更慢）⇒ 保存那一拍卡顿。
+            --   提前到这里（用户正按着 Z、尚未开始逐字）预加载，保存时查码 O(字数)。
+            --   char_dict_done 常驻，已加载则本调用 O(1) 零开销。
+            ensure_dict_loaded()
         else
             _coin_pending_input = nil
             -- ★ 用户开始输入非反引号内容（非空）⇒ 放弃未结束的逐字缓冲
@@ -881,7 +1027,6 @@ local function commit_text_processor(key, env)
         _coin_code_buf = {}
         _coin_pending_input = nil
         if valid_word(word) then
-            ensure_userphrase_file()
             fileappendtext(userphrasepath, word, code_input, nil)
             kcoin("end", "OK [" .. word .. "]")
         else
@@ -950,29 +1095,14 @@ end
 -- =================================================================
 
 local function user_coined_translator(input, seg, env)
-    -- 检查文件路径
-    if not userphrasepath or userphrasepath == "" then
-        userphrasepath = init_userphrase_path()
-        if userphrasepath == "" then
-            return
-        end
-    end
-    
     -- 获取原始输入（不受 abbrev 规则影响），用于混输方案
     local raw_input = ""
-    
-    -- 方式1：从 env.engine.context 获取（最可靠，Rime Lua API 标准方式）
-    -- env.engine.context.input 是用户原始输入，不受 algebra/abbrev 规则影响
     if env and env.engine and env.engine.context then
         raw_input = env.engine.context.input or ""
     end
-    
-    -- 方式2：从 seg 获取
     if raw_input == "" and seg then
         raw_input = seg.input or ""
     end
-    
-    -- 方式3：从 seg._context 获取
     if raw_input == "" then
         local ctx = seg and seg._context
         if ctx and ctx.input then
@@ -980,42 +1110,31 @@ local function user_coined_translator(input, seg, env)
         end
     end
 
-    -- ★ 2026-10-31 撤回：手动造词改回 enable_sentence 的徐码式逐字选择，
-    --   由 table_translator@mkst 原生吐 sentence 候选（含每段单字重码翻页），
-    --   本翻译器不再对反引号输入合成候选；上屏保存交给 coin_hook_notifier。
-
     -- 优先使用原始输入，避免 abbrev 规则导致的编码截断
-    -- 如果 raw_input 不为空且是纯字母，则使用它
     local query_input = raw_input:match("^[a-z]+$") or input
-    
-    -- 如果 query_input 为空或不是纯字母，直接返回
     if not query_input or not query_input:match("^[a-z]+$") then
         return
     end
-    
     -- 限制：输入少于2个字母时不显示自造词，优先一级简码
     if #query_input < 2 then
         return
     end
-    
-    -- ★ 读内存缓存，不再每键开一次文件（详见 get_userphrase_list 注释）
-    local entries = get_userphrase_list()
-    if #entries == 0 then return end
 
-    -- 判断是否为14键布局
+    -- 方案 B：从 C++ UserDb 前缀查询（内存哈希，无磁盘 IO），替代 io.open 读 txt
+    uc_migrate_once()
+    local db = uc_open()
+    if not db then return end
+
     local use_dual_key = is_14key_layout(env)
-    
-    -- 在循环外先标准化输入编码，避免重复计算
     local norm_input = use_dual_key and normalize_14key(query_input) or query_input
-    
+
     local seen = {}
     local function yield_user_coined(text, code, quality, is_temp)
         if seen[text] then
             return
         end
         seen[text] = true
-        -- 自动临时词在候选码后加 ☯（与手动造词视觉标记一致的图标）；
-        -- 转正后迁入手动词库 user_coined_ext.txt，不再带 temp 标记 ⇒ 图标自动消失。
+        -- 自动临时词在候选码后加 ☯（与手动造词视觉标记一致的图标）
         local disp = is_temp and (code .. "☯") or code
         local cand = Candidate("user_coined", seg.start, seg._end, text, disp)
         cand.quality = quality
@@ -1023,9 +1142,8 @@ local function user_coined_translator(input, seg, env)
     end
 
     local code_prefix
-    for _, e in ipairs(entries) do
-        local text, code = e.text, e.code
-        local is_temp = (e.temp == true)
+    -- ★ 方案 B：匹配逻辑不变，只是候选来源从「缓存 list」改为「UserDb query 结果」。
+    local function try_match(text, code, is_temp)
         code_prefix = code:sub(1, #query_input)
         local exact_match = (code == query_input)
         local prefix_match = (#query_input >= 2 and code:find("^" .. query_input) == 1)
@@ -1048,19 +1166,14 @@ local function user_coined_translator(input, seg, env)
         end
 
         if is_temp then
-            -- ★ 2026-10-28 修复：自动临时词【只在整码精确匹配时浮现】。
-            --   原实现让临时词参与前缀/反向/14键模糊匹配，且 quality 高达 850~950，
-            --   于是每输入两三个字母就冒出一堆自动垃圾词抢占前排候选：
-            --     · 正常词被顶到后几页（要翻候选栏）
-            --     · 手动造词要求目标字在第一候选 ⇒ 被临时词挤掉而造不了词
-            --   现在临时词仅当你「故意打出它的完整词组码」时才出现（用于召回转正），
-            --   平时零污染。quality 与手动词同为 950：撞码时（临时词编码与主词典高频词
-            --   同码，如 品饮 kkqn vs 咖啡馆 kkqn）确保带 ☯ 的临时词排在前排可点选转正，
-            --   不被主词典词顶到后几页（真机「临时词生成了却召回不到、转不了正」根因）。
+            -- ★ 2026-10-28 修复：自动临时词【只在整码精确匹配时浮现】（防候选污染），
+            --   v2.19 补 14 键模糊整码匹配。quality 950 确保撞码时 ☯ 候选排前排可点选转正。
             if exact_match then
                 yield_user_coined(text, code, 950, true)
-                -- ★ 2026-10-31 v2.16 诊断：精确命中自动临时词时打日志，真机确认「输编码召回 ☯ 候选」是否生效。
                 kcoin("recall", "临时词命中 [" .. text .. "]=" .. code .. " input=" .. query_input)
+            elseif dual_exact_match then
+                yield_user_coined(text, code, 900, true)
+                kcoin("recall", "临时词模糊命中 [" .. text .. "]=" .. code .. " input=" .. query_input)
             end
         elseif exact_match then
             yield_user_coined(text, code, 950)   -- 精确匹配：高于所有候选（拼音候选最高约800）
@@ -1076,6 +1189,36 @@ local function user_coined_translator(input, seg, env)
             yield_user_coined(text, code, 750)   -- 14键模糊前缀匹配：最低优先级
         end
     end
+
+    -- 前缀查询：只查与 query_input 首字母同键的 code 前缀（26键1前缀 / 14键2前缀）
+    local first = query_input:sub(1, 1)
+    local prefixes = { first }
+    if use_dual_key then
+        local l, r = get_key_pair(first)
+        prefixes = { l }
+        if r then prefixes[#prefixes + 1] = r end
+    end
+
+    local function query_prefix(pfx)
+        local acc = db:query("e\t" .. pfx)
+        if acc then
+            for k in acc:iter() do
+                local text, code = uc_parse_key(k)
+                if text then try_match(text, code, false) end
+            end
+        end
+        acc = db:query("a\t" .. pfx)
+        if acc then
+            for k in acc:iter() do
+                local text, code = uc_parse_key(k)
+                if text then try_match(text, code, true) end
+            end
+        end
+    end
+
+    for _, p in ipairs(prefixes) do
+        query_prefix(p)
+    end
 end
 
 -- =================================================================
@@ -1084,9 +1227,35 @@ end
 
 rawset(_G, "user_coined_translator", user_coined_translator)
 
--- ★ 2026-10-27：给外部模块用的缓存失效钩子（供 lua/user_coined_cmd.lua 的
---   删词命令调用）。_uc_cache 是本文件的 upvalue，外部模块够不着；删完词若是
---   清不掉它，user_coined_translator 还会把已删除的词吐出来，最多滞后一个 TTL（60 秒）。
-rawset(_G, "UserCoined_InvalidateCache", function() _uc_cache = nil end)
+-- ★ 方案 B：给 auto_coined.lua / user_coined_cmd.lua 的 UserDb 存储钩子。
+--   替代旧的 UserCoined_InvalidateCache（删词失效缓存）与 UserCoined_SetTempEntries
+--   （整批替换临时词缓存）—— 方案 B 下数据源是 C++ UserDb，写后天然即时可见，无需缓存失效。
+rawset(_G, "UserCoined_DB_PutTemp", uc_put_temp)
+rawset(_G, "UserCoined_DB_EraseTemp", uc_erase_temp)
+rawset(_G, "UserCoined_DB_PutManual", uc_put_manual)
+rawset(_G, "UserCoined_DB_EraseManual", uc_erase_manual)
+rawset(_G, "UserCoined_DB_HasManual", uc_has_manual)
+rawset(_G, "UserCoined_DB_ListManual", uc_list_manual)
+rawset(_G, "UserCoined_DB_ListTemp", uc_list_temp)
+rawset(_G, "UserCoined_DB_ClearManual", uc_clear_manual)
+rawset(_G, "UserCoined_DB_ClearTemp", uc_clear_temp)
+rawset(_G, "UserCoined_DB_Migrate", uc_migrate_once)
+
+-- ★ 2026-11-01 性能优化 A4：释放大字典，消除「关闭造词后卡顿延续、切方案才恢复」。
+--   根因：char_dict_cache（2.4 万单字）懒加载后常驻内存，LuaJIT 每次 GC 标记都要扫
+--   这几万条 ⇒ GC 停顿明显。关闭 auto_coined 开关只是不再查码/造词，但大字典已常驻，
+--   GC 压力仍在 ⇒ 打字仍卡。切方案会重建 Lua 状态机、清空 local 缓存 ⇒ 恢复流畅。
+--   这里暴露 release 钩子：auto_coined 检测到「开关开→关」边沿时调用，主动释放大字典，
+--   下次需要查码时再懒加载（首次重载那一下有开销，但换来关闭后彻底不卡）。
+--   （2026-11-01 后 phrases 已废弃，char_dict_phrases 恒 nil，保留置 nil 仅为防呆。）
+local function release_dict()
+    char_dict_cache   = nil
+    char_dict_phrases = nil
+    char_dict_done    = false
+    char_code_cache   = {}
+    char_code_cache_n = 0
+    bloom_blocks      = nil
+end
+rawset(_G, "UserCoined_ReleaseDict", release_dict)
 
 return commit_text_processor

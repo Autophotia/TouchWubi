@@ -10,8 +10,8 @@ assoc_fixed.txt 古诗文/生僻字联想补充脚本（方案一，纯 Python �
 用法:
     # 只生成补充文件（无风险，不改任何现有文件）
     python assoc_supplement.py --corpus <语料目录> \
-        --fixed ../space/schemas/TouchWB/lua/assoc_fixed.txt \
-        --common ../space/schemas/TouchWB/lua/assoc_common.txt \
+        --fixed ../space/schemas/TouchWB/lua/assoc/assoc_fixed.txt \
+        --common ../space/schemas/TouchWB/lua/assoc/assoc_common.txt \
         --out assoc_fixed_supplement.txt
 
     # 生成合并后的完整文件（写到新文件，绝不覆盖现有 assoc_fixed.txt）

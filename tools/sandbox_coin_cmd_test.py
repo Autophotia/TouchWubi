@@ -13,7 +13,7 @@ mock 掉 librime 的 Candidate / yield / engine.context，真读真写临时文�
   5  越界    删不存在的序号是否安全拒绝
   6  /zccx   是否删的就是「最后造的那条」（不依赖会话状态）
   7  重复锁  同一命令串被 compose 重复触发时不会连删两条
-  8  /zcqk   清空是否备份 .bak，且备份内容与清空前一致
+  8  /zcqk   清空是否备份 lua/user_coined.txt，且备份内容与清空前一致
   9  格式    删除后文件格式是否仍然规范（无空行、末行无多余换行），
              且后续再造词不会产生空行
   10 P       数字键接管：/zcsc 前缀下接管，满 2 位后不再接管
@@ -43,6 +43,75 @@ CMD_LUA = os.path.join(LUA_DIR, "user_coined_cmd.lua")
 
 HEADER = ["# 自造词文件", "# 格式：词条<Tab>编码", "# 即时生效，无需重新部署"]
 
+# 沙盒 mock：librime 的 C++ LevelDb（方案 B 后自造词主库迁到 UserDb），用 Lua table 模拟。
+MOCK_LEVELDB = r"""
+_MockDB = {}
+function LevelDb(name)
+    return {
+        open = function(self) return true end,
+        loaded = function(self) return true end,
+        close = function(self) end,
+        fetch = function(self, key) return _MockDB[key] end,
+        update = function(self, key, value) _MockDB[key] = value; return true end,
+        erase = function(self, key)
+            if _MockDB[key] ~= nil then _MockDB[key] = nil; return true end
+            return false
+        end,
+        query = function(self, prefix)
+            local keys = {}
+            for k in pairs(_MockDB) do
+                if string.sub(k, 1, #prefix) == prefix then keys[#keys + 1] = k end
+            end
+            table.sort(keys)
+            local i = 0
+            return { iter = function()
+                return function()
+                    i = i + 1
+                    if i <= #keys then return keys[i], _MockDB[keys[i]] end
+                    return nil
+                end
+            end }
+        end,
+    }
+end
+function mock_db_put(key, value) _MockDB[key] = value end
+function mock_db_get(key) return _MockDB[key] end
+function mock_db_count() local n = 0; for _ in pairs(_MockDB) do n = n + 1 end; return n end
+function mock_db_keys()
+    local out = {}
+    for k in pairs(_MockDB) do out[#out + 1] = k end
+    table.sort(out)
+    return out
+end
+function mock_db_texts(prefix)
+    local out = {}
+    for k in pairs(_MockDB) do
+        if string.sub(k, 1, #prefix) == prefix then
+            local code, text = string.match(k, '^.-\t([^\t]+)\t(.+)$')
+            if code and text then out[#out + 1] = text .. '\t' .. code .. '\t' .. tostring(_MockDB[k]) end
+        end
+    end
+    table.sort(out)
+    return table.concat(out, '\n')
+end
+-- 永久词按 seq 升序返回「词条<Tab>编码」行（供 Fixture.read_entries 断言）
+function mock_db_manual_lines()
+    local rows = {}
+    for k in pairs(_MockDB) do
+        if string.sub(k, 1, 2) == 'e\t' then
+            local code, text = string.match(k, '^.-\t([^\t]+)\t(.+)$')
+            if code and text then
+                rows[#rows + 1] = { text = text, code = code, seq = tonumber(_MockDB[k]) or 0 }
+            end
+        end
+    end
+    table.sort(rows, function(a, b) return a.seq < b.seq end)
+    local out = {}
+    for _, r in ipairs(rows) do out[#out + 1] = r.text .. '\t' .. r.code end
+    return table.concat(out, '\n')
+end
+"""
+
 
 def to_lua_path(p):
     return p.replace("\\", "/")
@@ -60,6 +129,7 @@ def build_runtime(user_dir):
     )
     L.execute("log = { info=function() end, error=function(m) print('[lua.error]', m) end,"
               " warning=function() end }")
+    L.execute(MOCK_LEVELDB)
     L.eval("dofile([[%s]])" % to_lua_path(SUBMIT_LUA))
     L.execute("""
         _yielded = {}
@@ -96,6 +166,9 @@ class Fixture(object):
     def __init__(self, tmp):
         self.tmp = tmp
         self.path = os.path.join(tmp, "user_coined_ext.txt")
+        self.bak_dir = os.path.join(tmp, "lua")
+        self.bak_path = os.path.join(self.bak_dir, "user_coined.txt")
+        os.makedirs(self.bak_dir, exist_ok=True)
         self.L, self.cmd = build_runtime(tmp)
         self._f = self.L.eval("function(x) end")
 
@@ -127,10 +200,19 @@ class Fixture(object):
         self.cmd["T"](inp, seg, g.env)
         return [(p["text"], p["comment"]) for p in g.yielded_pairs().values()]
 
+    def _db_clear_manual(self):
+        """清空 mock UserDb 里的永久词（e\t 前缀），保留 meta/临时词"""
+        self.L.execute("""
+            local to_erase = {}
+            for k in pairs(_MockDB) do
+                if string.sub(k, 1, 2) == 'e\\t' then to_erase[#to_erase + 1] = k end
+            end
+            for _, k in ipairs(to_erase) do _MockDB[k] = nil end
+        """)
+
     def clear_lib(self):
-        """把当前库清成「清空后的样子」（只留注释头），且不触发备份"""
-        with io.open(self.path, "w", encoding="utf-8", newline="") as f:
-            f.write("\n".join(HEADER))
+        """把当前库清成空（不触发备份）"""
+        self._db_clear_manual()
 
     def unlock(self):
         """用一条非本模块的输入跑一次 F，清掉单次执行锁（模拟用户中间打了别的字）"""
@@ -138,8 +220,8 @@ class Fixture(object):
         self.run_filter("/zctj")
 
     def read_bak(self, n=1):
-        """读第 n 份备份，返回 (全部原始行, 有效条目, 备份时间串)"""
-        p = self.path + (".bak2" if n == 2 else ".bak")
+        """读备份（lua/user_coined.txt），返回 (全部原始行, 有效条目, 备份时间串)"""
+        p = self.bak_path
         if not os.path.exists(p):
             return None, None, None
         with io.open(p, "r", encoding="utf-8", newline="") as f:
@@ -170,26 +252,25 @@ class Fixture(object):
         pushed = g._pushed
         return ret, pushed
 
-    # ---- 文件 ----
+    # ---- UserDb（方案 B：主词库在 mock C++ UserDb，不再读写 txt）----
     def write_entries(self, entries):
-        """按 Submit_text 的真实写入格式生成文件（无末尾换行）"""
-        lines = list(HEADER) + ["%s\t%s" % (t, c) for t, c in entries]
-        with io.open(self.path, "w", encoding="utf-8", newline="") as f:
-            f.write("\n".join(lines))
+        """按 seq 递增写入 mock UserDb（entries 顺序 = 正序 = 旧→新），并置 \0seq meta"""
+        self._db_clear_manual()
+        for i, (t, c) in enumerate(entries, 1):
+            self.L.execute("mock_db_put('e\\t%s\\t%s', '%d')" % (c, t, i))
+        self.L.execute("mock_db_put('\\0seq', '%d')" % len(entries))
 
     def read_lines(self):
-        if not os.path.exists(self.path):
-            return []
-        with io.open(self.path, "r", encoding="utf-8", newline="") as f:
-            raw = f.read()
-        return raw.split("\n")
+        return self.read_entries()
 
     def read_entries(self):
-        return [ln for ln in self.read_lines() if ln and not ln.startswith("#")]
+        """读 mock UserDb 永久词，返回正序 'text\tcode' 列表（seq 升序）"""
+        s = self.L.eval("mock_db_manual_lines()")
+        return [ln for ln in (s or "").split("\n") if ln]
 
     def write_bak(self, entries):
-        """直接写备份文件（模拟「之前某次清空留下的备份」），不带时间戳头"""
-        p = self.path + ".bak"
+        """直接写备份文件（lua/user_coined.txt，模拟「之前某次清空留下的备份」），不带时间戳头"""
+        p = self.bak_path
         with io.open(p, "w", encoding="utf-8", newline="") as f:
             f.write("\n".join(["%s\t%s" % (t, c) for t, c in entries]))
 
@@ -315,7 +396,7 @@ def main():
         fx.set_input("/zcqk")
         out = fx.run_filter("/zcqk")
         left = fx.read_entries()
-        bak = fx.path + ".bak"
+        bak = fx.bak_path
         bak_ok = False
         if os.path.exists(bak):
             with io.open(bak, "r", encoding="utf-8", newline="") as f:
@@ -340,17 +421,16 @@ def main():
         fail += check("三条命令均提示暂无自造词且无异常", allok, detail)
         print("")
 
-        # ---- 9. 删除后格式仍规范（无空行）----
-        print("【9】删除后再造词，文件不应产生空行")
+        # ---- 9. 删除后再造词，库内无重复/空条目且新词入库（方案 B：无 txt，改查 UserDb）----
+        print("【9】删除后再造词，库内无重复/空条目且新词入库")
         fx.write_entries(sample)
         fx.set_input("/zcsc02")
         fx.run_filter("/zcsc02")
-        # 用 Submit_text 自己的追加函数再造一个词，模拟真实接续写入
+        # 用 Submit_text 自己的追加函数再造一个词，模拟真实接续写入（写 UserDb）
         fx.L.globals().fileappendtext(fx.L.globals().get_userphrase_path(), "中国", "kh`lg", None)
-        lines = fx.read_lines()
-        empties = [i + 1 for i, ln in enumerate(lines) if ln == ""]
-        ok = not empties
-        fail += check("无空行（空行行号：%s）" % (empties or "无"), ok, lines)
+        texts = [e.split("\t")[0] for e in fx.read_entries()]
+        ok = ("中国" in texts and len(texts) == 4)
+        fail += check("删除 1 条 + 追加 1 条 = 4 条，且含「中国」", ok, fx.read_entries())
         print("")
 
         # ---- 10. P 数字接管 ----

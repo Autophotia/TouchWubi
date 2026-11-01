@@ -28,6 +28,63 @@ SCHEMA_DIR = os.path.join(ROOT, "space", "schemas", "TouchWB")
 LUA_DIR = os.path.join(SCHEMA_DIR, "lua")
 SUBMIT_LUA = os.path.join(LUA_DIR, "Submit_text.lua")
 
+# 沙盒 mock：librime 的 C++ LevelDb（方案 B 后自造词存储迁到 UserDb），用 Lua table 模拟。
+MOCK_LEVELDB = r"""
+_MockDB = {}
+function LevelDb(name)
+    return {
+        open = function(self) return true end,
+        loaded = function(self) return true end,
+        close = function(self) end,
+        fetch = function(self, key) return _MockDB[key] end,
+        update = function(self, key, value) _MockDB[key] = value; return true end,
+        erase = function(self, key)
+            if _MockDB[key] ~= nil then _MockDB[key] = nil; return true end
+            return false
+        end,
+        query = function(self, prefix)
+            local keys = {}
+            for k in pairs(_MockDB) do
+                if string.sub(k, 1, #prefix) == prefix then keys[#keys + 1] = k end
+            end
+            table.sort(keys)
+            local i = 0
+            return { iter = function()
+                return function()
+                    i = i + 1
+                    if i <= #keys then return keys[i], _MockDB[keys[i]] end
+                    return nil
+                end
+            end }
+        end,
+    }
+end
+function mock_db_put(key, value) _MockDB[key] = value end
+function mock_db_get(key) return _MockDB[key] end
+function mock_db_count() local n = 0; for _ in pairs(_MockDB) do n = n + 1 end; return n end
+function mock_db_keys()
+    local out = {}
+    for k in pairs(_MockDB) do out[#out + 1] = k end
+    table.sort(out)
+    return out
+end
+function mock_db_manual_lines()
+    local rows = {}
+    for k in pairs(_MockDB) do
+        if string.sub(k, 1, 2) == 'e\t' then
+            local code, text = string.match(k, '^.-\t([^\t]+)\t(.+)$')
+            if code and text then
+                rows[#rows + 1] = { text = text, code = code, seq = tonumber(_MockDB[k]) or 0 }
+            end
+        end
+    end
+    table.sort(rows, function(a, b) return a.seq < b.seq end)
+    local out = {}
+    for _, r in ipairs(rows) do out[#out + 1] = r.text .. '\t' .. r.code end
+    return table.concat(out, '\n')
+end
+"""
+
 
 def to_lua_path(p):
     """Windows 路径 -> Lua 可安全使用的正斜杠路径"""
@@ -56,9 +113,28 @@ def build_runtime(user_dir, schema_dir, shared_dir=""):
     L.execute("log = { info=function() end, error=function(m) print('[lua.error]', m) end,"
               " warning=function() end }")
 
+    L.execute(MOCK_LEVELDB)
+
     # 加载模块；dofile 的返回值就是 Submit_text.lua 末尾 return 的 processor
     processor = L.eval("dofile([[%s]])" % to_lua_path(SUBMIT_LUA))
     return L, g, processor
+
+
+def db_entries(L):
+    """读 mock UserDb 永久词，返回 'text\tcode' 列表（seq 升序）"""
+    s = L.eval("mock_db_manual_lines()")
+    return [ln for ln in (s or "").split("\n") if ln]
+
+
+def db_clear(L):
+    """清空 mock UserDb 永久词（e\t 前缀）"""
+    L.execute("""
+        local to_erase = {}
+        for k in pairs(_MockDB) do
+            if string.sub(k, 1, 2) == 'e\\t' then to_erase[#to_erase + 1] = k end
+        end
+        for _, k in ipairs(to_erase) do _MockDB[k] = nil end
+    """)
 
 
 def read_coined(path):
@@ -108,7 +184,7 @@ def main():
         print("【用例 2】标准五笔编码能否从字典查到（决定写入编码是否正确）")
         print("  方法：调用 fileappendtext 但不给 input，只看字典查询路线")
         fileappendtext(p, "中国", None, None)
-        entries = read_coined(coined_path)
+        entries = db_entries(L)
         if entries:
             print("  写入内容 : %s" % entries)
             print("  ✅ 字典查询可用，标准编码路线工作正常")
@@ -120,13 +196,12 @@ def main():
         print("")
 
         # 清理用例 2 的痕迹，保证后续用例独立
-        if os.path.exists(coined_path):
-            os.remove(coined_path)
+        db_clear(L)
 
         # ── 用例 3：完整造词流程（编码`编码 → 降级路线）────────
         print("【用例 3】完整造词流程：输入 'kh`lg' 选中「中国」后按空格")
         fileappendtext(p, "中国", "kh`lg", None)
-        entries = read_coined(coined_path)
+        entries = db_entries(L)
         print("  文件内容 : %s" % entries)
         if entries:
             text, code = entries[0].split("\t") if "\t" in entries[0] else (entries[0], "")
@@ -143,7 +218,7 @@ def main():
         # ── 用例 4：重复写入去重 ────────────────────────────────
         print("【用例 4】重复造同一个词是否去重")
         fileappendtext(p, "中国", "kh`lg", None)
-        entries = read_coined(coined_path)
+        entries = db_entries(L)
         ok = len(entries) == 1
         print("  文件词条数 : %d" % len(entries))
         print("  %s" % ("✅ 通过：无重复" if ok else "❌ 失败：出现重复条目"))
@@ -152,9 +227,9 @@ def main():
 
         # ── 用例 5：含字母的输入应被拒绝 ────────────────────────
         print("【用例 5】含字母的「词」应被拒绝（防止把编码当词条写进去）")
-        before = len(read_coined(coined_path))
+        before = len(db_entries(L))
         fileappendtext(p, "abc", "kh`lg", None)
-        after = len(read_coined(coined_path))
+        after = len(db_entries(L))
         ok = (before == after)
         print("  写入前 %d 条 → 写入后 %d 条" % (before, after))
         print("  %s" % ("✅ 通过：已拒绝" if ok else "❌ 失败：含字母的串被写进去了"))
@@ -190,10 +265,9 @@ def main():
         #   故意给一个错误的 input，若仍写入字典里的标准编码 khlg，
         #   说明标准编码路线生效（修复前会写入错误的 xxyy）
         print("【用例 8】标准五笔编码应优先于用户输入（修复前会写入错误编码）")
-        if os.path.exists(coined_path):
-            os.remove(coined_path)
+        db_clear(L)
         fileappendtext(p, "中国", "xx`yy", None)   # 输入故意给错
-        entries = read_coined(coined_path)
+        entries = db_entries(L)
         got = entries[0].split("\t")[-1] if entries else ""
         ok = (got == "khlg")
         print("  输入 'xx`yy'（错误编码）→ 实际写入编码: '%s'  (期望 'khlg')" % got)
@@ -205,10 +279,9 @@ def main():
         # ── 用例 9：2/3/4 字词的编码规则 ───────────────────────
         print("【用例 9】多字词标准编码（2字每字2位 / 3字 1+1+2 / 4字 1+1+1+1）")
         for word, expect in (("中国", "khlg"), ("计算机", "ytsm"), ("中华人民共和国", "kwwl")):
-            if os.path.exists(coined_path):
-                os.remove(coined_path)
+            db_clear(L)
             fileappendtext(p, word, None, None)   # 不给 input，纯靠字典
-            es = read_coined(coined_path)
+            es = db_entries(L)
             code = es[0].split("\t")[-1] if es else "(未写入)"
             ok = (code == expect)
             print("  %-8s -> %-6s (期望 %-6s) %s" % (word, code, expect, "✅" if ok else "❌"))

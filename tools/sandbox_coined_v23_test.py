@@ -25,6 +25,59 @@ LUA_DIR = os.path.join(SCHEMA_DIR, "lua")
 SUBMIT_LUA = os.path.join(LUA_DIR, "Submit_text.lua")
 AUTO_LUA = os.path.join(LUA_DIR, "auto_coined.lua")
 
+# 沙盒 mock：librime 的 C++ LevelDb（方案 B 后自造词存储迁到 UserDb），用 Lua table 模拟。
+MOCK_LEVELDB = r"""
+_MockDB = {}
+function LevelDb(name)
+    return {
+        open = function(self) return true end,
+        loaded = function(self) return true end,
+        close = function(self) end,
+        fetch = function(self, key) return _MockDB[key] end,
+        update = function(self, key, value) _MockDB[key] = value; return true end,
+        erase = function(self, key)
+            if _MockDB[key] ~= nil then _MockDB[key] = nil; return true end
+            return false
+        end,
+        query = function(self, prefix)
+            local keys = {}
+            for k in pairs(_MockDB) do
+                if string.sub(k, 1, #prefix) == prefix then keys[#keys + 1] = k end
+            end
+            table.sort(keys)
+            local i = 0
+            return { iter = function()
+                return function()
+                    i = i + 1
+                    if i <= #keys then return keys[i], _MockDB[keys[i]] end
+                    return nil
+                end
+            end }
+        end,
+    }
+end
+function mock_db_put(key, value) _MockDB[key] = value end
+function mock_db_get(key) return _MockDB[key] end
+function mock_db_count() local n = 0; for _ in pairs(_MockDB) do n = n + 1 end; return n end
+function mock_db_keys()
+    local out = {}
+    for k in pairs(_MockDB) do out[#out + 1] = k end
+    table.sort(out)
+    return out
+end
+function mock_db_texts(prefix)
+    local out = {}
+    for k in pairs(_MockDB) do
+        if string.sub(k, 1, #prefix) == prefix then
+            local code, text = string.match(k, '^.-\t([^\t]+)\t(.+)$')
+            if code and text then out[#out + 1] = text .. '\t' .. code .. '\t' .. tostring(_MockDB[k]) end
+        end
+    end
+    table.sort(out)
+    return table.concat(out, '\n')
+end
+"""
+
 
 def to_lua(p):
     return p.replace("\\", "/")
@@ -43,6 +96,7 @@ def build_runtime(user_dir, schema_dir):
     )
     L.execute("log = { info=function() end, error=function(m) print('[lua.error]', m) end,"
               " warning=function() end }")
+    L.execute(MOCK_LEVELDB)
     return L
 
 
@@ -75,6 +129,7 @@ def main():
     # ================================================================
     print("\n【修复 1 · 逐词上屏字级窗口】")
     L1 = build_runtime(tmp, SCHEMA_DIR)
+    L1.eval("dofile([[%s]])" % to_lua(SUBMIT_LUA))   # 暴露真实 UserCoined_DB_* 钩子
     L1.execute("""
         code_seq = 0
         auto_coined_stdcode = function(phrase)
@@ -84,11 +139,7 @@ def main():
         auto_coined_in_main_dict = function(phrase)
             return phrase == "自动" or phrase == "造词" or phrase == "功能"
         end
-        get_autophrase_path = function() return [[__AUTO_PATH__]] end
-        get_userphrase_path = function() return [[__MANUAL_PATH__]] end
-        UserCoined_AppendManual = function(text, code) return true end
-        UserCoined_InvalidateCache = function() end
-    """.replace("__AUTO_PATH__", to_lua(auto_path)).replace("__MANUAL_PATH__", to_lua(manual_path)))
+    """)
 
     L1.execute("""
         OPTION_ON = true
@@ -130,7 +181,8 @@ def main():
     L1.execute("click_commit('造词')")
     L1.execute("click_commit('功能')")
 
-    texts = {e.split("\t")[0] for e in read_non_comment(auto_path)}
+    temp = L1.eval("mock_db_texts('a\\t')")
+    texts = {ln.split("\t")[0] for ln in temp.split("\n") if ln}
     expected = {"自动造", "自动造词", "自动造词功",
                 "动造", "动造词", "动造词功", "动造词功能",
                 "造词功", "造词功能", "词功", "词功能"}
@@ -143,15 +195,6 @@ def main():
         print("  多余：%s" % (sorted(extra) if extra else "无"))
     print("  %s" % ("✅ 通过：字级窗口齐全（含 5 字「自动造词功」，且主词典词被过滤）"
                     if ok else "❌ 失败"))
-    fail += 0 if ok else 1
-
-    # 空行：auto.txt 头三行后应有一个空行
-    alines = raw_lines(auto_path)
-    ok = (len(alines) >= 4 and alines[0].startswith("#") and alines[1].startswith("#")
-          and alines[2].startswith("#") and alines[3] == "")
-    print("\n【修复 3 · 临时词 txt 注释头空行】")
-    print("  前 4 行：%r" % (alines[:4] if len(alines) >= 4 else alines))
-    print("  %s" % ("✅ 通过：3 行注释头 + 第 4 行空行" if ok else "❌ 失败"))
     fail += 0 if ok else 1
 
     # ================================================================
@@ -216,26 +259,28 @@ def main():
     # 点候选栏上屏（无任何按键事件）→ v2.12 单字/词组一律累积，不直接保存
     L2.execute("click_commit2('万灵药')")
 
-    entries = read_non_comment(manual_path)
-    ok = (entries == [])
-    print("  点选上屏后（未结束）user_coined_ext.txt：%s" % (entries if entries else "(空)"))
+    manual = L2.eval("mock_db_texts('e\\t')")
+    texts0 = {ln.split("\t")[0] for ln in manual.split("\n") if ln}
+    ok = (texts0 == set())
+    print("  点选上屏后（未结束）UserDb 永久词：%s" % (sorted(texts0) if texts0 else "(空)"))
     print("  %s" % ("✅ 通过：点击候选栏上屏先累积进缓冲、未直接保存" if ok else "❌ 失败：被提前保存"))
     fail += 0 if ok else 1
 
     # 长按Z（input=`）再按空格 → 一次性保存整词
     L2.execute("ctx2.input = '`'")
     processor(L2.eval("make_key2(0x20)"), L2.eval("env2"))
-    entries = read_non_comment(manual_path)
-    texts2 = {e.split("\t")[0] for e in entries}
-    print("  长按Z+空格后 user_coined_ext.txt：%s" % entries)
+    manual = L2.eval("mock_db_texts('e\\t')")
+    texts2 = {ln.split("\t")[0] for ln in manual.split("\n") if ln}
+    print("  长按Z+空格后 UserDb 永久词：%s" % (sorted(texts2) if texts2 else "(空)"))
     ok = ("万灵药" in texts2)
     print("  %s" % ("✅ 通过：点击候选栏上屏 + 长按Z空格 保存了手动造词" if ok else "❌ 失败：未保存"))
     fail += 0 if ok else 1
 
     # 重复触发 notifier 不应重复保存
-    before = len(entries)
+    before = len(texts2)
     L2.execute("if ctx2.update_notifier.fn then ctx2.update_notifier.fn(ctx2) end")
-    after = len(read_non_comment(manual_path))
+    manual2 = L2.eval("mock_db_texts('e\\t')")
+    after = len({ln.split("\t")[0] for ln in manual2.split("\n") if ln})
     ok = (before == after)
     print("  重复触发 notifier：词条 %d → %d  %s" % (before, after,
           "✅ 通过（无重复保存）" if ok else "❌ 失败（被重复保存）"))

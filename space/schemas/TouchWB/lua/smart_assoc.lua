@@ -101,7 +101,7 @@ local MAX_CONT_TOKENS = 4        -- 一条后续最多由几个 token 拼成
 local IDLE_BREAK_SEC = 300       -- 距上次上屏超过这么久 ⇒ 视为新的一句话
 local LEARN_MAX_CHARS = 8        -- 单个上屏块超过这么长就不学
 local FIXED_MAX = 6              -- 固定候选最多补几条
-local FIXED_FILE = "lua/assoc_fixed.txt"
+local FIXED_FILE = "lua/assoc/assoc_fixed.txt"
 
 -- ===================================================================
 -- ★ S101b-2：联想候选的「常用字白名单」—— 挡掉历史里养出来的生僻字
@@ -136,7 +136,7 @@ local FIXED_FILE = "lua/assoc_fixed.txt"
 -- 【失败策略：fail-open】表读不到（比如没打进包）⇒ **不过滤**，
 --   宁可放过生僻字，也不能让联想整个空掉。加载结果可在 /lxzt 里看。
 -- ===================================================================
-local COMMON_FILE = "lua/assoc_common.txt"
+local COMMON_FILE = "lua/assoc/assoc_common.txt"
 local ASSOC_COMMON_ONLY = true   -- 关掉 = 退回 S101b 之前的行为（不拦生僻字）
 local _common = nil              -- set[汉字] = true
 local _common_tried = false

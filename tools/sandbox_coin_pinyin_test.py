@@ -28,6 +28,59 @@ LUA_DIR = os.path.join(SCHEMA_DIR, "lua")
 SUBMIT_LUA = os.path.join(LUA_DIR, "Submit_text.lua")
 AUTO_LUA = os.path.join(LUA_DIR, "auto_coined.lua")
 
+# 沙盒 mock：librime 的 C++ LevelDb（方案 B 后自造词存储迁到 UserDb），用 Lua table 模拟。
+MOCK_LEVELDB = r"""
+_MockDB = {}
+function LevelDb(name)
+    return {
+        open = function(self) return true end,
+        loaded = function(self) return true end,
+        close = function(self) end,
+        fetch = function(self, key) return _MockDB[key] end,
+        update = function(self, key, value) _MockDB[key] = value; return true end,
+        erase = function(self, key)
+            if _MockDB[key] ~= nil then _MockDB[key] = nil; return true end
+            return false
+        end,
+        query = function(self, prefix)
+            local keys = {}
+            for k in pairs(_MockDB) do
+                if string.sub(k, 1, #prefix) == prefix then keys[#keys + 1] = k end
+            end
+            table.sort(keys)
+            local i = 0
+            return { iter = function()
+                return function()
+                    i = i + 1
+                    if i <= #keys then return keys[i], _MockDB[keys[i]] end
+                    return nil
+                end
+            end }
+        end,
+    }
+end
+function mock_db_put(key, value) _MockDB[key] = value end
+function mock_db_get(key) return _MockDB[key] end
+function mock_db_count() local n = 0; for _ in pairs(_MockDB) do n = n + 1 end; return n end
+function mock_db_keys()
+    local out = {}
+    for k in pairs(_MockDB) do out[#out + 1] = k end
+    table.sort(out)
+    return out
+end
+function mock_db_texts(prefix)
+    local out = {}
+    for k in pairs(_MockDB) do
+        if string.sub(k, 1, #prefix) == prefix then
+            local code, text = string.match(k, '^.-\t([^\t]+)\t(.+)$')
+            if code and text then out[#out + 1] = text .. '\t' .. code .. '\t' .. tostring(_MockDB[k]) end
+        end
+    end
+    table.sort(out)
+    return table.concat(out, '\n')
+end
+"""
+
 
 def to_lua(p):
     return p.replace("\\", "/")
@@ -46,6 +99,7 @@ def build_runtime(user_dir, schema_dir):
     )
     L.execute("log = { info=function() end, error=function(m) print('[lua.error]', m) end,"
               " warning=function() end }")
+    L.execute(MOCK_LEVELDB)
     return L
 
 
@@ -126,11 +180,11 @@ def main():
     L2.execute("click_commit('之')")                   # 模拟拼音上屏「之」
     L2.execute("click_commit('田')")                   # 模拟拼音上屏「田」
 
-    entries = read_non_comment(auto_path)
+    temp = L2.eval("mock_db_texts('a\\t')")
+    entries = [ln.split("\t") for ln in temp.split("\n") if ln]   # [text, code, tick]
     expect_code = stdcode2("之田")                     # 反查期望码（「之田」不在主词典）
-    ok = any(e.split("\t")[0] == "之田" and e.split("\t")[1] == expect_code
-             for e in entries)
-    print("  拼音上屏「之」「田」后 user_coined_auto.txt：%s（期望码 %s）" % (entries, expect_code))
+    ok = any(e[0] == "之田" and e[1] == expect_code for e in entries)
+    print("  拼音上屏「之」「田」后 UserDb 临时词：%s（期望码 %s）" % (entries, expect_code))
     print("  %s" % ("✅ 通过：拼音上屏的字入链，码=反查的 %s" % expect_code if ok
                     else "❌ 失败：未造出「之田 %s」" % expect_code))
     fail += 0 if ok else 1
@@ -204,12 +258,12 @@ def main():
     L3.execute("ctx.input = '`'")
     processor(L3.eval("make_key(0x20)"), L3.eval("env"))
 
-    entries = read_non_comment(manual_path)
-    ok = any(e == "手动\trtfc" for e in entries)
-    print("  反引号段拼音选字后 user_coined_ext.txt：%s" % entries)
-    print("  %s" % ("✅ 通过：拼音选字成词，保存码=反查的 rtfc" if ok
+    in_db = L3.eval("mock_db_get('e\\trtfc\\t手动') ~= nil")
+    manual = L3.eval("mock_db_texts('e\\t')")
+    print("  反引号段拼音选字后 UserDb 永久词：%s" % manual)
+    print("  %s" % ("✅ 通过：拼音选字成词，保存码=反查的 rtfc" if in_db
                     else "❌ 失败：未保存「手动 rtfc」"))
-    fail += 0 if ok else 1
+    fail += 0 if in_db else 1
 
     shutil.rmtree(tmp, ignore_errors=True)
     print("\n" + "=" * 70)

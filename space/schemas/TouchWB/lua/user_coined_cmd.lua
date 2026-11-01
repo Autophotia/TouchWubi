@@ -11,8 +11,8 @@
 --     /zctj        统计（自造词条数 + 备份条数）+ 倒序全量列表
 --     /zcscNN      删除倒序第 NN 条（序号固定 2 位，01 = 最近造的那条，上限 99）
 --     /zccx        撤销：一键删除最后造的词
---     /zcqk        清空全部（清空前自动备份到 user_coined_ext.bak）
---     /zcdr        导入：从 .bak 合并恢复（只补当前没有的词）
+--     /zcqk        清空全部（清空前自动备份到 lua/user_coined.txt）
+--     /zcdr        导入：从备份 txt 合并恢复（只补当前没有的词）
 --
 --   「备份」不单设命令，与 /zctj 合用：有备份就显示「有备份：共 N 条」。
 --   清空时的备份是「合并去重」：把当前库里、备份里没有的词追加进备份，
@@ -61,80 +61,70 @@ local HEADER = {
 -- == 文件读写层 ==
 -- ============================================================
 
--- 自造词文件路径。优先复用 Submit_text.lua 的全局函数（口径唯一）；
--- 拿不到（模块未加载/路径尚未就绪）时按同样规则自己拼一次。
-local function get_path()
+-- 备份文件路径：lua/user_coined.txt（与 userdb 同名 user_coined、txt 方便查看，放 lua/ 下
+--   与联想 assoc_*.txt、调序 tips 数据平级统一。方案 B 下主词库在 C++ UserDb，备份仍写 txt，
+--   因备份是低频操作，不影响打字性能）。
+local function get_bak_path()
     local p = nil
     pcall(function()
-        if type(get_userphrase_path) == "function" then
-            p = get_userphrase_path()
-        end
-    end)
-    if p and p ~= "" then return p end
-    pcall(function()
         local d = rime_api and rime_api.get_user_data_dir and rime_api.get_user_data_dir() or ""
-        if d == "" then return end
-        d = d:gsub("\\", "/")
-        if d:sub(-1) ~= "/" then d = d .. "/" end
-        p = d .. "user_coined_ext.txt"
+        if d ~= "" then
+            d = d:gsub("\\", "/")
+            if d:sub(-1) ~= "/" then d = d .. "/" end
+            local dir = d .. "lua"
+            p = dir .. "/user_coined.txt"
+            -- 确保 lua/ 目录存在（联想/调序的 LevelDb 通常会先创建，这里兜底）
+            pcall(function() os.execute('mkdir -p "' .. dir .. '" 2>/dev/null') end)
+        end
     end)
     return p or ""
 end
 
--- 备份文件路径：单份 user_coined_ext.bak。
--- ★ 为什么是单份而非多份：备份采用「合并去重」，每轮清空只往备份里追加新词、
---   从不删旧，所以一份备份就完整覆盖全部历史，不需要多份轮转。
-local function get_bak_path()
-    local p = get_path()
-    if p == "" then return "" end
-    return p .. ".bak"
-end
-
--- 让 Submit_text.lua 的自造词缓存（user_coined_translator 用的那份）立即失效，
--- 否则删完还会从旧缓存里冒出来，最多滞后一个 TTL（60 秒）。
-local function invalidate_cache()
+-- ============================================================
+-- == UserDb 访问层（方案 B：主词库迁 C++ UserDb，不再 io.open 读 txt）==
+-- ============================================================
+local function db_migrate()
     pcall(function()
-        if type(UserCoined_InvalidateCache) == "function" then
-            UserCoined_InvalidateCache()
-        end
+        if type(UserCoined_DB_Migrate) == "function" then UserCoined_DB_Migrate() end
     end)
 end
 
--- 读文件：返回 lines（原样逐行，含注释行）与 entries（有效条目倒序表）
--- entries[i] = { text=词条, code=编码, line=在 lines 中的行号 }
--- 注意：entries 是**倒序**的（最新造的排第 1），与命令里用的序号口径一致。
+-- 倒序永久词 list（元素 { text, code, seq }，seq 降序 = 最近在前）
+local function db_list_manual()
+    local f = _G.UserCoined_DB_ListManual
+    if type(f) ~= "function" then return {} end
+    local ok, rows = pcall(f)
+    return (ok and rows) and rows or {}
+end
+
+local function db_erase_manual(text, code)
+    local f = _G.UserCoined_DB_EraseManual
+    if type(f) ~= "function" then return false end
+    local ok = pcall(f, text, code)
+    return ok == true
+end
+
+-- true = 新增成功；false = 已存在或失败
+local function db_put_manual(text, code)
+    local f = _G.UserCoined_DB_PutManual
+    if type(f) ~= "function" then return false end
+    local ok = pcall(f, text, code)
+    return ok == true
+end
+
+local function db_clear_manual()
+    local f = _G.UserCoined_DB_ClearManual
+    if type(f) ~= "function" then return false end
+    local ok = pcall(f)
+    return ok == true
+end
+
+-- 读词库：返回 lines（恒 nil，兼容旧签名）与 entries（倒序，元素 { text, code, seq }）。
+-- 注意：entries 是**倒序**的（最近造的排第 1），与命令里用的序号口径一致。
+-- 方案 B：数据源是 C++ UserDb，不再 io.open 读 txt。
 local function read_all()
-    local p = get_path()
-    if p == "" then return nil, nil, "路径未就绪" end
-
-    local f = io.open(p, "rb")
-    local lines = {}
-    if f then
-        for raw in f:lines() do
-            -- ★ 二进制读：Windows 文本模式会把 \r\n 翻成 \n（写入时反之亦然），
-            --   那样同一个文件在 PC 上重写一遍就变 CRLF、回到手机又变回 LF，
-            --   行尾来回漂更容易出问题。这里统一剥掉行尾的 \r，保证写出的永远是 LF。
-            --   （循环变量在 Lua 5.5 起只读，故用 raw 转一道）
-            local line = raw:gsub("\r$", "")
-            lines[#lines + 1] = line
-        end
-        f:close()
-    end
-    -- 文件不存在 = 还没造过词，按空库处理（不是错误）
-
-    local entries = {}
-    for i, line in ipairs(lines) do
-        if not line:match("^#") and line ~= "" then
-            local text, code = line:match("^([^\t]+)\t([a-z]+)")
-            if text and code then
-                entries[#entries + 1] = { text = text, code = code, line = i }
-            end
-        end
-    end
-
-    local rev = {}
-    for i = #entries, 1, -1 do rev[#rev + 1] = entries[i] end
-    return lines, rev, nil
+    db_migrate()
+    return nil, db_list_manual(), nil
 end
 
 -- 原子化写回：临时文件写完再改名归位，避免写一半崩掉把自造词库弄坏。
@@ -166,14 +156,7 @@ local function write_lines(p, lines)
     return true, nil
 end
 
--- 删除 lines 里指定的行号，返回新 lines
-local function drop_line(lines, lineno)
-    local out = {}
-    for i, line in ipairs(lines) do
-        if i ~= lineno then out[#out + 1] = line end
-    end
-    return out
-end
+-- （方案 B：删除改走 UserDb erase，不再需要按行号 drop_line。）
 
 -- ============================================================
 -- == 备份层 ==
@@ -194,15 +177,14 @@ local function stamp_lines(lines)
     return out
 end
 
--- 写备份：合并去重（union）。
+-- 写备份：合并去重（union）。方案 B 下 entries 来自 UserDb（倒序，含 text/code/seq），
+--   备份仍写 txt（低频操作，不影响打字性能）。
 -- ★ 语义：备份 = 旧备份 ∪ 当前库。旧备份已有的词条原样保留（含编码与顺序），
 --   当前库里、旧备份没有的词条按「旧→新」追加到备份末尾。
---   这样无论清空多少次、中间删过多少词，备份永远只增不减、不丢词。
--- ★ 判重键用「词条」而非「词条+编码」：与 /zcdr 恢复一致（同词两码无意义），
---   且以旧备份里已有的编码为准 —— 用户后来改过的编码不被覆盖。
 -- 返回值：ok, added（成功时为本次并入的新词条数；失败时为错误串）
-local function backup_lines(lines, entries)
+local function backup_lines(entries)
     local p = get_bak_path()
+    if p == "" then return false, "备份路径未就绪" end
 
     -- 读旧备份的物理行（正序，含注释头）与已有词条集合
     local bak_lines = {}
@@ -218,8 +200,7 @@ local function backup_lines(lines, entries)
         of:close()
     end
 
-    -- entries 是倒序（最新在前）；从尾到头遍历 = 正序（旧→新）追加，
-    -- 保证备份物理顺序仍是「旧→新」，末行始终是本次并入里最新的词。
+    -- entries 是倒序（最新在前）；从尾到头遍历 = 正序（旧→新）追加
     local added = 0
     for i = #entries, 1, -1 do
         local e = entries[i]
@@ -230,7 +211,6 @@ local function backup_lines(lines, entries)
         end
     end
 
-    -- stamp_lines 会摘掉旧的「备份时间」行并在最前插新时间，因此时间戳始终新鲜
     local ok, werr = write_lines(p, stamp_lines(bak_lines))
     if not ok then return false, tostring(werr) end
     return true, added
@@ -272,7 +252,7 @@ end
 -- ============================================================
 
 local function op_delete_index(n)
-    local lines, entries, err = read_all()
+    local _, entries, err = read_all()
     if err then return false, err end
     if #entries == 0 then return false, "暂无自造词" end
     if n < 1 or n > #entries then
@@ -280,45 +260,33 @@ local function op_delete_index(n)
     end
 
     local target = entries[n]
-    local p = get_path()
-    local ok, werr = write_lines(p, drop_line(lines, target.line))
-    if not ok then return false, tostring(werr) end
-
-    invalidate_cache()
+    db_erase_manual(target.text, target.code)
     return true, string.format("已删除第 %d 条：%s（%s）", n, target.text, target.code), #entries - 1
 end
 
 local function op_delete_last()
-    local lines, entries, err = read_all()
+    local _, entries, err = read_all()
     if err then return false, err end
     if #entries == 0 then return false, "暂无自造词" end
 
     local target = entries[1]
-    local p = get_path()
-    local ok, werr = write_lines(p, drop_line(lines, target.line))
-    if not ok then return false, tostring(werr) end
-
-    invalidate_cache()
+    db_erase_manual(target.text, target.code)
     return true, string.format("已撤销最近造的词：%s（%s）", target.text, target.code), #entries - 1
 end
 
 local function op_clear_all()
-    local lines, entries, err = read_all()
+    local _, entries, err = read_all()
     if err then return false, err end
     if #entries == 0 then return false, "暂无自造词" end
 
-    local p = get_path()
     -- 清空是唯一没法挽回的动作 ⇒ 先把当前库并进备份（合并去重），真后悔还能 /zcdr 翻回来
-    local bok, added = backup_lines(lines, entries)
+    local bok, added = backup_lines(entries)
     if not bok then
         -- 备份失败就中止清空：宁可清不掉，也不冒「删光且没退路」的风险
         return false, "备份失败，已中止清空：" .. tostring(added)
     end
 
-    local ok, werr = write_lines(p, { HEADER[1], HEADER[2], HEADER[3] })
-    if not ok then return false, tostring(werr) end
-
-    invalidate_cache()
+    db_clear_manual()
     if added > 0 then
         return true, string.format("已清空 %d 条自造词（备份并入 %d 条新词）", #entries, added), 0
     end
@@ -331,13 +299,14 @@ end
 -- ★ 判重键用「词条」而不是「词条+编码」：同一个词两个编码没有意义，
 --   且以现有库为准 —— 用户后面改过的编码不该被旧备份盖回去。
 local function op_restore()
+    db_migrate()
     local bentries, _, err = read_backup()
     if err then return false, err end
     if #bentries == 0 then
         return false, "暂无备份（/zcqk 清空时会自动备份）"
     end
 
-    local lines, cur, rerr = read_all()
+    local _, cur, rerr = read_all()
     if rerr then return false, rerr end
 
     local have = {}
@@ -345,12 +314,11 @@ local function op_restore()
 
     local added = 0
     -- ★ 按「备份的原始顺序」写回：read_backup 给的是倒序（最新在前），
-    --   这里从尾到头遍历 = 正序 append，保证恢复后文件末行仍是备份里最新造的词，
-    --   否则 /zccx、/zcscN 的序号语义（末行=最新）会被整个反转。
+    --   从尾到头遍历 = 正序，保证恢复后「最近」语义不反转（seq 递增 = 越后恢复越新）。
     for i = #bentries, 1, -1 do
         local e = bentries[i]
         if not have[e.text] then
-            lines[#lines + 1] = e.text .. "\t" .. e.code
+            db_put_manual(e.text, e.code)
             have[e.text] = true
             added = added + 1
         end
@@ -360,17 +328,6 @@ local function op_restore()
         return true, "备份中的词条都已在库里，无需恢复", #cur
     end
 
-    local p = get_path()
-    -- 库原本就是空的（文件不存在）时补回注释头，让格式与 Submit_text 生成的一致
-    if #lines == added then
-        local l = { HEADER[1], HEADER[2], HEADER[3] }
-        for _, x in ipairs(lines) do l[#l + 1] = x end
-        lines = l
-    end
-    local ok, werr = write_lines(p, lines)
-    if not ok then return false, "写回失败：" .. tostring(werr) end
-
-    invalidate_cache()
     return true, string.format("已从备份导入 %d 条（备份共 %d 条）", added, #bentries),
            #cur + added
 end

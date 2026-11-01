@@ -26,16 +26,68 @@ SCHEMA_DIR = os.path.join(ROOT, "space", "schemas", "TouchWB")
 LUA_DIR = os.path.join(SCHEMA_DIR, "lua")
 SUBMIT_LUA = os.path.join(LUA_DIR, "Submit_text.lua")
 
+# 沙盒 mock：librime 的 C++ LevelDb（方案 B 后自造词存储迁到 UserDb），用 Lua table 模拟。
+MOCK_LEVELDB = r"""
+_MockDB = {}
+function LevelDb(name)
+    return {
+        open = function(self) return true end,
+        loaded = function(self) return true end,
+        close = function(self) end,
+        fetch = function(self, key) return _MockDB[key] end,
+        update = function(self, key, value) _MockDB[key] = value; return true end,
+        erase = function(self, key)
+            if _MockDB[key] ~= nil then _MockDB[key] = nil; return true end
+            return false
+        end,
+        query = function(self, prefix)
+            local keys = {}
+            for k in pairs(_MockDB) do
+                if string.sub(k, 1, #prefix) == prefix then keys[#keys + 1] = k end
+            end
+            table.sort(keys)
+            local i = 0
+            return { iter = function()
+                return function()
+                    i = i + 1
+                    if i <= #keys then return keys[i], _MockDB[keys[i]] end
+                    return nil
+                end
+            end }
+        end,
+    }
+end
+function mock_db_put(key, value) _MockDB[key] = value end
+function mock_db_get(key) return _MockDB[key] end
+function mock_db_count() local n = 0; for _ in pairs(_MockDB) do n = n + 1 end; return n end
+function mock_db_keys()
+    local out = {}
+    for k in pairs(_MockDB) do out[#out + 1] = k end
+    table.sort(out)
+    return out
+end
+function mock_db_texts(prefix)
+    local out = {}
+    for k in pairs(_MockDB) do
+        if string.sub(k, 1, #prefix) == prefix then
+            local code, text = string.match(k, '^.-\t([^\t]+)\t(.+)$')
+            if code and text then out[#out + 1] = text .. '\t' .. code .. '\t' .. tostring(_MockDB[k]) end
+        end
+    end
+    table.sort(out)
+    return table.concat(out, '\n')
+end
+"""
+
 
 def to_lua(p):
     return p.replace("\\", "/")
 
 
-def read_non_comment(path):
-    if not os.path.exists(path):
-        return []
-    with open(path, "r", encoding="utf-8") as f:
-        return [ln.rstrip("\n") for ln in f if ln.strip() and not ln.startswith("#")]
+def db_manual_texts(L):
+    """读取 mock UserDb 中永久词（e\t 前缀）的词条文本列表。"""
+    s = L.eval("mock_db_texts('e\\t')")
+    return [ln.split("\t")[0] for ln in s.split("\n") if ln]
 
 
 def build_runtime(user_dir):
@@ -51,13 +103,14 @@ def build_runtime(user_dir):
     )
     L.execute("log = { info=function() end, error=function(m) print('[lua.error]', m) end,"
               " warning=function() end }")
+    L.execute(MOCK_LEVELDB)
     return L
 
 
 def main():
     fail = 0
     tmp = tempfile.mkdtemp(prefix="touchwb_v212_")
-    manual_path = os.path.join(tmp, "user_coined_ext.txt")
+    manual_path = os.path.join(tmp, "UserDb 永久词")
 
     print("=" * 70)
     print("手动造词 v2.12 单字/词组累积 + 长按Z再按空格结束 沙盒测试")
@@ -135,9 +188,9 @@ def main():
     L.execute("ctx.input = '`ll'")
     processor(L.eval("make_key(108)"), L.eval("env"))
     L.execute("click_commit('田')")
-    entries = read_non_comment(manual_path)
+    entries = db_manual_texts(L)
     ok = (entries == [])
-    print("  之、田 上屏后 user_coined_ext.txt：%s" % (entries if entries else "(空)"))
+    print("  之、田 上屏后 UserDb 永久词：%s" % (entries if entries else "(空)"))
     print("  %s" % ("✅ 通过：单字只进缓冲、未落盘" if ok else "❌ 失败：单字被提前保存"))
     fail += 0 if ok else 1
 
@@ -146,18 +199,18 @@ def main():
     L.execute("ctx.input = '`lgp'")
     processor(L.eval("make_key(112)"), L.eval("env"))
     L.execute("click_commit('回到家')")
-    entries = read_non_comment(manual_path)
+    entries = db_manual_texts(L)
     ok = (entries == [])
-    print("  回到家 上屏后 user_coined_ext.txt：%s" % (entries if entries else "(空)"))
+    print("  回到家 上屏后 UserDb 永久词：%s" % (entries if entries else "(空)"))
     print("  %s" % ("✅ 通过：词组也进缓冲、不独立保存" if ok else "❌ 失败：词组被独立保存"))
     fail += 0 if ok else 1
 
     L.execute("ctx.input = '`ktq'")
     processor(L.eval("make_key(113)"), L.eval("env"))
     L.execute("click_commit('吃饱')")
-    entries = read_non_comment(manual_path)
+    entries = db_manual_texts(L)
     ok = (entries == [])
-    print("  吃饱 上屏后 user_coined_ext.txt：%s" % (entries if entries else "(空)"))
+    print("  吃饱 上屏后 UserDb 永久词：%s" % (entries if entries else "(空)"))
     print("  %s" % ("✅ 通过：第二个词组仍只进缓冲" if ok else "❌ 失败"))
     fail += 0 if ok else 1
 
@@ -166,9 +219,9 @@ def main():
     L.execute("ctx.input = '`'")
     L.execute("ctx.input = '`rt'")   # 模拟：缓冲非空，但输入区是编码（非纯反引号）
     processor(L.eval("make_key(0x20)"), L.eval("env"))
-    entries = read_non_comment(manual_path)
+    entries = db_manual_texts(L)
     ok = (entries == [])
-    print("  空格后（input=`rt）user_coined_ext.txt：%s" % (entries if entries else "(空)"))
+    print("  空格后（input=`rt）UserDb 永久词：%s" % (entries if entries else "(空)"))
     print("  %s" % ("✅ 通过：非纯反引号 + 空格不结束" if ok else "❌ 失败：误触发结束"))
     fail += 0 if ok else 1
 
@@ -176,10 +229,10 @@ def main():
     print("\n【用例 4 · 长按Z（input=`）再按空格 → 一次性保存整词】")
     L.execute("ctx.input = '`'")   # 长按Z → 纯反引号
     processor(L.eval("make_key(0x20)"), L.eval("env"))   # 空格
-    entries = read_non_comment(manual_path)
+    entries = db_manual_texts(L)
     texts = {e.split("\t")[0] for e in entries}
     ok = ("之田回到家吃饱" in texts)
-    print("  长按Z+空格后 user_coined_ext.txt：%s" % entries)
+    print("  长按Z+空格后 UserDb 永久词：%s" % entries)
     print("  %s" % ("✅ 通过：缓冲合并成「之田回到家吃饱」保存" if ok else "❌ 失败：未保存"))
     fail += 0 if ok else 1
 
@@ -192,7 +245,7 @@ def main():
     processor(L.eval("make_key(107)"), L.eval("env"))   # → 放弃缓冲
     L.execute("ctx.input = '`'")
     processor(L.eval("make_key(0x20)"), L.eval("env"))   # 长按Z+空格（缓冲已空）
-    entries = read_non_comment(manual_path)
+    entries = db_manual_texts(L)
     texts = {e.split("\t")[0] for e in entries}
     ok = ("之" not in texts)
     print("  放弃后再结束：词条集合 %s" % texts)
