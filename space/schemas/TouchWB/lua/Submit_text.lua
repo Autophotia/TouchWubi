@@ -960,6 +960,17 @@ local function commit_text_processor(key, env)
     local input_text = context.input
     local candidate_count = 0
 
+    -- ★ 2026-11-03 修复：PC 端关闭官方 predictor（prediction「总联想」开关）。
+    --   predictor 上屏后会在 composition 里建「空段」吐预测候选（「我/第/然/微信号」等），
+    --   空段让 composition 非空 ⇒ is_composing()/has_menu() 恒 true，标点键被误判乱出字。
+    --   PC 端智能联想本就被 smart_assoc 关掉（is_mobile 门控），官方 predictor 是唯一漏网者。
+    --   只在 PC（not is_mobile）关；移动端不动（移动端联想候选正是挂在 predictor 空段上）。
+    --   ⚠ 只在当前为 true 时才 set（get_option 为 true → 设 false），避免每次按键反复触发
+    --   option_update_notifier 引发 RefreshNonConfirmedComposition 的副作用。
+    if not is_mobile() and context:get_option("prediction") then
+        context:set_option("prediction", false)
+    end
+
     -- ★ 惰性连接 update_notifier（首次连接后 no-op），让「点候选栏上屏」也能触发手动造词
     coin_hook_notifier(env)
 
@@ -983,6 +994,12 @@ local function commit_text_processor(key, env)
                     klog("Submit_text", "3rd_candidate=" .. (env.last_3th_text.text or "nil") .. " type=" .. (env.last_3th_text.type or "nil"))
                 end
             end
+        else
+            -- ★ 2026-11-03 修复：不在「正在打码字母」状态（空状态/标点/其它）时立即清空
+            --   二三候选缓存。原实现只在打码时刷新缓存、上屏后 input 为空不再走刷新分支，
+            --   导致「打『测试』上屏后按分号/引号把残留的『测度/小幅度』顶上来」。
+            env.last_2th_text = {text="", type=""}
+            env.last_3th_text = {text="", type=""}
         end
     end
 
@@ -1062,23 +1079,27 @@ local function commit_text_processor(key, env)
     -- ★ 手机上禁用。26 键布局「L 上滑 = '」本来是要打引号的，
     --   在这里被截胡 ⇒ 打码出候选时上滑 L 会莫名其妙上屏第 3 候选。
     --   手机上直接点候选栏更顺手，这个快捷键只留给 PC。
+    -- ★ 2026-11-02 二次修复：原 `has_menu` / `is_composing` 判据都靠不住——
+    --   predictor 在上屏后会建「空段」吐预测候选（「我/第/的/论」等），空段让
+    --   composition 非空 ⇒ is_composing() 恒为 true，于是上屏后按 `'` 会把
+    --   **上一次打码缓存的第 3 候选**（如 imya 的「小幅度」）顶上来（真机乱出字根因）。
+    --   改用 `context.input ~= ""`（真正的「正在打码」判据，predictor 空段不消耗 input），
+    --   +「确有第 3 候选才 return 1」，否则放行给 pair_punct 打单引号。
     if key.keycode == 0x27 and not is_mobile() then
-        klog("Submit_text", "apostrophe key pressed, has_menu=" .. tostring(context:has_menu()) .. " is_composing=" .. tostring(context:is_composing()) .. " last_3th_text=" .. (env.last_3th_text and env.last_3th_text.text or "nil"))
-        if context:has_menu() then
-            if env.last_3th_text and env.last_3th_text.text ~= "" then
-                klog("Submit_text", "committing 3rd candidate: " .. env.last_3th_text.text)
-                context:clear()
-                engine:commit_text(env.last_3th_text.text)
-                if _G.InputStats_Report then _G.InputStats_Report(env.last_3th_text.text) end
-            end
+        klog("Submit_text", "apostrophe key pressed, input=[" .. tostring(context.input) .. "] input_len=" .. tostring(#(context.input or "")) .. " has_menu=" .. tostring(context:has_menu()) .. " is_composing=" .. tostring(context:is_composing()) .. " comp_empty=" .. tostring(composition:empty()) .. " prediction=" .. tostring(context:get_option("prediction")) .. " last_3th_text=" .. (env.last_3th_text and env.last_3th_text.text or "nil"))
+        if context.input and context.input ~= "" and env.last_3th_text and env.last_3th_text.text ~= "" then
+            klog("Submit_text", "committing 3rd candidate: " .. env.last_3th_text.text)
+            context:clear()
+            engine:commit_text(env.last_3th_text.text)
+            if _G.InputStats_Report then _G.InputStats_Report(env.last_3th_text.text) end
             return 1
         end
     end
 
-    -- 分号上屏第二候选（同上：手机上禁用，理由一样）
+    -- 分号上屏第二候选（同上：手机上禁用，理由一样；判据同为 `input ~= ""`）
     if key.keycode == 0x3B and not is_mobile() then
-        klog("Submit_text", "semicolon key pressed, has_menu=" .. tostring(context:has_menu()) .. " is_composing=" .. tostring(context:is_composing()) .. " last_2th_text=" .. (env.last_2th_text and env.last_2th_text.text or "nil"))
-        if context:is_composing() and env.last_2th_text and env.last_2th_text.text ~= "" then
+        klog("Submit_text", "semicolon key pressed, input=[" .. tostring(context.input) .. "] input_len=" .. tostring(#(context.input or "")) .. " has_menu=" .. tostring(context:has_menu()) .. " is_composing=" .. tostring(context:is_composing()) .. " comp_empty=" .. tostring(composition:empty()) .. " prediction=" .. tostring(context:get_option("prediction")) .. " last_2th_text=" .. (env.last_2th_text and env.last_2th_text.text or "nil"))
+        if context.input and context.input ~= "" and env.last_2th_text and env.last_2th_text.text ~= "" then
             klog("Submit_text", "committing 2nd candidate: " .. env.last_2th_text.text)
             context:clear()
             engine:commit_text(env.last_2th_text.text)

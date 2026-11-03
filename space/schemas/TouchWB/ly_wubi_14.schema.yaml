@@ -147,6 +147,7 @@ engine:
     - lua_filter@*super_sequence*F         # 候选字词快捷键手动调序（移动设备send数字调序）
     - lua_filter@*smart_assoc*F         # 智能联想：/lxqk 清空 /lxzt 状态（放 S+F 之后）
     - lua_filter@*user_coined_cmd*F       # 自造词管理：/zcscN 删除 /zccx 撤销 /zcqk 清空
+    - lua_filter@*drop_sentence            # 丢弃整句切分候选（sentence），根除 tane→和世有 等乱词
     - lua_filter@*wubi_pinyin_filter       # 重码筛选（第五码拼音首字母筛选），放在S+F之后，在已排序候选基础上筛选
     - simplifier
     - simplifier@es_conversion
@@ -170,7 +171,7 @@ engine:
     - lua_translator@user_coined_translator
     - table_translator@fixed
     - table_translator@mkst
-    - script_translator@wubi_prefix        # 为 wubi_pinyin_filter 提供第 5 码筛选支持（见文末 wubi_prefix 段说明）
+    - script_translator@wubi_prefix       # 为 wubi_pinyin_filter 提供第 5 码筛选支持（见文末 wubi_prefix 段说明）
     - reverse_lookup_translator
     - lua_translator@*calculator
     - lua_translator@*email_suffix_translator  # 显示常用邮箱后缀
@@ -234,12 +235,14 @@ translator:
 #   268 行回归实测：只写下面两行 与 把整段抄一遍 逐字一致（0 差异）。
 #
 # 唯一必须覆盖的是 prism：14 键的棱镜 ly_wubi_14 是按本方案 speller 里那
-#   12 条 derive 别名规则编译出来的音节图；若沿用主方案的 26 键棱镜，
+#   12 条 derive 别名规则编译出来的；若沿用主方案的 26 键棱镜，
 #   别名串的切分对不上 —— 实测 29 行回归发生变化，5 码筛选整体失效
 #   （taned→坦然地、tanef→空、taneg→和/禾）。
 #   ⇒ 本段可以精简，但**不能整段删掉**（删掉 = 继承主方案棱镜）。
 #
-# 组件本身的作用与「为什么不能换成 table_translator」见主方案同段注释。
+# ★ 2026-11-02：随主方案由 table_translator 回退到 script_translator。
+#   （回退原因见主方案 wubi_prefix 段注释：第五码 z 失效 + 14键 fffff 失效。）
+#   script_translator 不依赖 enable_sentence，故本段不再显式覆盖该字段。
 # ================================================================
 wubi_prefix:
   prism: *schema                            # ★ 14键专用棱镜，不能沿用主方案的

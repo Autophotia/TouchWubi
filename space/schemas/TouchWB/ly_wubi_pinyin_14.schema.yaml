@@ -158,6 +158,7 @@ engine:
     - lua_filter@*super_sequence*F         # 候选字词快捷键手动调序（移动设备send数字调序）
     - lua_filter@*smart_assoc*F         # 智能联想：/lxqk 清空 /lxzt 状态（放 S+F 之后）
     - lua_filter@*user_coined_cmd*F       # 自造词管理：/zcscN 删除 /zccx 撤销 /zcqk 清空
+    - lua_filter@*drop_sentence            # 丢弃整句切分候选（sentence），根除 tane→和世有/`xihuan→纱柴油机 等乱词
     - lua_filter@*wubi_pinyin_filter       # 重码筛选（第五码拼音首字母筛选），放在S+F之后，在已排序候选基础上筛选
     - simplifier
     - simplifier@es_conversion
@@ -182,8 +183,8 @@ engine:
     - lua_translator@user_coined_translator
     - table_translator@fixed
     - table_translator@mkst
-    - table_translator@mkst_pinyin         # 反引号段拼音筛字：`shou 也能选字（绕开不会打的字）
-    - script_translator@wubi_prefix        # 为 wubi_pinyin_filter 提供第 5 码筛选支持（见文末 wubi_prefix 段说明）
+    - reverse_lookup_translator@mkst_pinyin # 反引号段拼音：`shou 选字 / `pinyin 出词组（绕开不会打的字）
+    - script_translator@wubi_prefix       # 为 wubi_pinyin_filter 提供第 5 码筛选支持（见文末 wubi_prefix 段说明）
     - reverse_lookup_translator
     - lua_translator@*calculator
     - lua_translator@*email_suffix_translator  # 显示常用邮箱后缀
@@ -277,12 +278,14 @@ translator:
 #   268 行回归实测：只写下面两行 与 把整段抄一遍 逐字一致（0 差异）。
 #
 # 唯一必须覆盖的是 prism：14 键的棱镜 ly_wubi_pinyin_14 是按本方案 speller 里那
-#   12 条 derive 别名规则编译出来的音节图；若沿用主方案的 26 键棱镜，
+#   12 条 derive 别名规则编译出来的；若沿用主方案的 26 键棱镜，
 #   别名串的切分对不上 —— 实测 29 行回归发生变化，5 码筛选整体失效
 #   （taned→坦然地、tanef→空、taneg→和/禾）。
 #   ⇒ 本段可以精简，但**不能整段删掉**（删掉 = 继承主方案棱镜）。
 #
-# 组件本身的作用与「为什么不能换成 table_translator」见主方案同段注释。
+# ★ 2026-11-02：随主方案由 table_translator 回退到 script_translator。
+#   （回退原因见主方案 wubi_prefix 段注释：第五码 z 失效 + 14键 fffff 失效。）
+#   script_translator 不依赖 enable_sentence，故本段不再显式覆盖该字段。
 # ================================================================
 wubi_prefix:
   prism: *schema                            # ★ 14键专用棱镜，不能沿用主方案的
@@ -323,22 +326,15 @@ mkst:
   tag: mkst
   tips: "〔自造词〕"
 
-# ★ 2026-10-31：反引号段拼音筛字（手动造词用拼音选字，绕开不会打的字）。
-#   与 mkst（五笔）共用同一反引号段（tag=mkst）：输入 `rt 走五笔、输入 `shou 走拼音。
+# ★ 2026-11-01：反引号段拼音（手动造词用拼音选字/出词组，绕开不会打的字）。
+#   机制与 26 键一致（见主方案同段注释）：reverse_lookup_translator 走音节图切分，
+#   单字 `shou、词组 `pinyin 都能出；quality 恒 0 自然排在五笔 mkst(450) 之后。
+#   本段唯一必须覆盖的是 prism：14 键棱镜 ly_pinyin_14，不能沿用主方案的 ly_pinyin。
 mkst_pinyin:
-  db_class: tabledb
   dictionary: ly_pinyin
   prism: ly_pinyin_14
-  prefix: "`"
   tag: mkst
-  initial_quality: 400            # 低于五笔 mkst(450)：反引号段五笔候选优先
   enable_completion: false
-  enable_sentence: false
-  enable_encoder: false
-  enable_user_dict: false
-  encode_commit_history: false
-  enable_charset_filter: false
-  max_phrase_length: 4
 # ========================================
 # 🔍 识别器增强：支持短码快速上屏
 # ========================================

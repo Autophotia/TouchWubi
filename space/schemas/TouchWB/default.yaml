@@ -81,8 +81,16 @@ key_binder:                                            # 键盘绑定设置（�
     # Control+Shift+P 切换配对标点开关
     - {toggle: pair_symbol, accept: "Control+Shift+P", when: always}
     # 分号引号上屏二三候选
-    - {accept: semicolon, send: 2, when: has_menu}
-    - {accept: apostrophe, send: 3, when: has_menu}
+    # ★ 2026-11-02 二次修复：删除这两条 key_binder 绑定。原因——
+    #   ① 打码场景已由 Submit_text.lua 的分号/单引号分支先处理（return 1 吞键），
+    #      这里根本收不到打码中的分号/单引号，纯属冗余；
+    #   ② 空状态/上屏后 predictor 会建「空段」吐预测候选，空段让 composition 非空
+    #      ⇒ `when: composing`（= IsComposing，input 非空**或** composition 非空）恒为
+    #      true，send: 2/3 会把预测候选当第 2/3 候选上屏（真机乱出字根因）。
+    #   正确的「正在打码」判据是 `input ~= ""`，已落在 Submit_text.lua 里（predictor
+    #   空段不消耗 input，故 input 为空即可排除预测候选）。
+    #   （小键盘 KP_0~9 的 when: composing 同理有预测空段误触发，但小键盘数字键
+    #     在空状态按的场景极少，暂保留；如需彻底可后续一并处理。）
 
     # 小键盘数字映射到主键盘，支持计算器输入数字金额等场景
     - {accept: KP_0, send: 0, when: composing}

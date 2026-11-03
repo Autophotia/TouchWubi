@@ -719,8 +719,35 @@ local function filter(input, env)
             --   第 5 码 d 不在候选 span 内 ⇒ 点选后引擎提交「接单」却把 d 残留回编码栏（「接单d」）。
             --   克隆候选、把 span 拉满到整串输入（含反引号），让第 5 码一并被消费，点选正常上屏。
             local full_len = #input_str
+            -- ★ 2026-11-01：反引号段第 5 位有两种意图 —— ①「4 码五笔 + 1 码拼音首字母」
+            --   （`rtfcs=手动+s 筛重码）；② 一个 5 字母的完整拼音（`liang→两、`nihao→你好）。
+            --   旧逻辑把 ② 也当 ① 处理：两 的前 4 位 lian 被当五笔、第 5 位 g 被当首字母
+            --   筛「l 声母」⇒ 两/量/亮 被整片误杀。改为与主 5 码分支同构：
+            --   拼音反查候选单独收集，整串能完整拼成拼音（含 14 键别名）时拼音优先，
+            --   否则走「前 4 码五笔 + 第 5 码拼音首字母」筛选（`rtfcs 语义不变）。
+            local reverse_cands = {}
+            local reverse_seen = {}
+            local wubi_cands = {}
+            local wubi_seen = {}
+            local spell_cover = false
+            local full_spell_sets = env.is_mixed
+                and build_letter_sets(pure_code, pure_code_len, env.use_key_pairs, env.left_to_right)
+                or nil
             for cand in input:iter() do
-                -- 前 4 码按五笔逐位匹配，第 5 码按拼音首字母筛选
+                if cand.type == "reverse_lookup" then
+                    -- 拼音反查候选：单独收集，不参与「第 5 码拼音首字母筛选」
+                    if full_spell_sets and not spell_cover
+                       and is_full_spell_cand(cand, full_spell_sets, pure_code_len, env.spll_rvdb) then
+                        spell_cover = true
+                    end
+                    local key = make_candidate_key(cand)
+                    if not reverse_seen[key] then
+                        reverse_seen[key] = true
+                        table.insert(reverse_cands, cand)
+                    end
+                    goto continue_backtick5
+                end
+                -- 五笔候选：前 4 码按五笔逐位匹配，第 5 码按拼音首字母筛选（原逻辑不变）
                 if not matches_prefix(cand, pure_code, 4, env.use_key_pairs, env.left_to_right, env.spll_rvdb, env.use_last_char) then
                     goto continue_backtick5
                 end
@@ -730,14 +757,31 @@ local function filter(input, env)
                     if initials_hit(initials, pinyin_filters) then
                         local orig_start = tonumber(cand.start) or 0
                         local orig_end = tonumber(cand._end) or cand._end
-                        if orig_start ~= 0 or orig_end ~= full_len then
-                            yield(clone_candidate(cand, 0, full_len, cand.preedit))
-                        else
-                            yield(cand)
+                        local key = make_candidate_key(cand)
+                        if not wubi_seen[key] then
+                            wubi_seen[key] = true
+                            if orig_start ~= 0 or orig_end ~= full_len then
+                                table.insert(wubi_cands, clone_candidate(cand, 0, full_len, cand.preedit))
+                            else
+                                table.insert(wubi_cands, cand)
+                            end
                         end
                     end
                 end
                 ::continue_backtick5::
+            end
+
+            -- 拼音优先判定：整串是一个完整的拼音拼写（含 14 键别名 spell_cover）
+            local prefer_pinyin = spell_cover
+                or ((#reverse_cands > 0)
+                    and is_exact_pinyin_input(pure_code, reverse_cands, env.spll_rvdb, env.is_mixed))
+
+            if prefer_pinyin then
+                -- 整串是完整拼音 ⇒ 只显示拼音候选
+                for _, cand in ipairs(reverse_cands) do yield(cand) end
+            else
+                -- 否则走五笔筛选（`rtfcs 语义不变）
+                for _, cand in ipairs(wubi_cands) do yield(cand) end
             end
             return
         end
@@ -918,7 +962,18 @@ local function filter(input, env)
                 end
                 goto continue
             end
-            if not matches_prefix(cand, pure_code, 4, env.use_key_pairs, env.left_to_right, env.spll_rvdb, env.use_last_char) then
+            -- 【2026-11-02 修复 14键 fffff 失效】短码五笔候选按其「实际消费长度」做前缀匹配。
+            -- 之前写死 n=4，简码命中（如 14键 fffff 的「封」= fff，_end=3）的编码长度 < 4，
+            -- 会被 matches_letter_sets 里 `#candidate_code < need` 判 false 而整栏误杀 ⇒ 变空。
+            -- 修复：n = min(4, _end)。reverse_lookup 候选仍固定 4（其「读音前 4 位」语义不变）。
+            local prefix_n = 4
+            if cand.type ~= "reverse_lookup" then
+                local ce = tonumber(cand._end) or cand._end
+                if ce and ce >= 1 and ce < 4 then
+                    prefix_n = ce
+                end
+            end
+            if not matches_prefix(cand, pure_code, prefix_n, env.use_key_pairs, env.left_to_right, env.spll_rvdb, env.use_last_char) then
                 goto continue
             end
             if cand.type == "reverse_lookup" then

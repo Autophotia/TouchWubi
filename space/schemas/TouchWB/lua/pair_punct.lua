@@ -9,6 +9,9 @@ local M = {}
 local processor = {}
 local segmentor = {}
 
+-- ★ 2026-11-03 诊断开关：排查「上屏后按标点乱出字」用，定位后改回 false。
+_G.__touchwb_punct_dbg = false
+
 -- ★ 移动端判定（与 smart_assoc.lua 完全同款实现）
 --   用途：26 键 K/L 下滑要走 punctuator 的 pair（左右交替出单个符号），
 --         而 PC 端保留「一次出一对」的老行为，互不干扰。
@@ -238,8 +241,7 @@ function segmentor.init(env)
 end
 
 function processor.init(env)
-    env.last_processed_key = nil
-    env.last_processed_time = 0
+    -- 无状态：引号改为放行给 punctuator 做 pair 交替，不再需要「连按去重」状态
 end
 
 local shift_char_map = {
@@ -269,7 +271,6 @@ local shift_char_map = {
 function processor.func(key, env)
     local context = env.engine.context
     local composition = context.composition
-    local current_time = os.clock()
     
     local repr = key:repr()
     local has_shift = repr:match("^Shift%+") ~= nil
@@ -281,12 +282,6 @@ function processor.func(key, env)
     
     local input = context.input or ""
     if string.sub(input, 1, 1) == "=" then
-        return 2
-    end
-    
-    if (base_key_value == "quotedbl" or base_key_value == "apostrophe") and 
-       env.last_processed_key == base_key_value and 
-       (current_time - env.last_processed_time < 0.2) then
         return 2
     end
 
@@ -366,6 +361,21 @@ function processor.func(key, env)
     end
 
     local has_candidate_menu = context:has_menu()
+
+    -- ★ 2026-11-03 诊断：临时打印标点决策现场（排查后关掉 _G.__touchwb_punct_dbg）
+    if _G.__touchwb_punct_dbg then
+        local _top = ""
+        pcall(function() local c = context:get_selected_candidate(); if c and c.text then _top = c.text end end)
+        pcall(function()
+            if log and log.info then
+                log.info("pair_punct key=" .. tostring(key_char) .. " input=[" .. tostring(input) ..
+                    "] has_menu=" .. tostring(has_candidate_menu) ..
+                    " comp_empty=" .. tostring(composition:empty()) ..
+                    " is_composing=" .. tostring(context:is_composing()) ..
+                    " top=" .. tostring(_top))
+            end
+        end)
+    end
     
     local top_candidate_text = ""
     if has_candidate_menu then
@@ -421,7 +431,15 @@ function processor.func(key, env)
     --     输入码也是空的，那时若豁免 ⇒ 会把正常打字的配对标点功能也一起关掉。
     --     加上标志条件，把空窗期排除。
     local _live_in = context.input or ""
-    if _live_in == "" and _G.__touchwb_assoc_seg then
+    -- ★ 2026-11-03 修复：引号键（apostrophe/quotedbl）**不走**「空状态+联想段豁免」。
+    --   根因：session 初始化时 predictor 建「init 空段」（预测 "$"，commit_history 空），
+    --   has_menu=true、输入码空 ⇒ smart_assoc 的现场判定 `_live_assoc=(in=="")and has_menu`
+    --   误判为「联想段」⇒ 这里把引号键 return 2 放行给 punctuator ⇒ punctuator 对
+    --   引号键（keycode 0x27）punct_segmentor 不匹配、fallback 成 raw 段 ⇒ 英文引号
+    --   ' / " 卡进编码栏、以「单候选菜单」形式显示（用户本次反馈的现象）。
+    --   引号键在空状态下本应走下方 QUOTEFIX 分支（Lua 直接交替上屏中文引号），
+    --   故在此排除引号键，让它们继续往下，不被这个豁免拦截。
+    if _live_in == "" and _G.__touchwb_assoc_seg and base_key_value ~= "apostrophe" and base_key_value ~= "quotedbl" then
         -- S90 探针：只累计数，日志由 smart_assoc 的 P.func 统一打印
         _G.__touchwb_punct_exempt = (_G.__touchwb_punct_exempt or 0) + 1
         return 2
@@ -448,7 +466,13 @@ function processor.func(key, env)
         return 1
     end
 
-    if has_candidate_menu then
+    -- ★ 2026-11-02 修复：空状态（input 为空，没在打码）时 predictor 会吐预测候选
+    --   （「我/第/然/微信号」等），此时 has_menu 也为 true，原代码误判为「打码有候选」，
+    --   走「顶候选 + 标点」把预测候选顶上屏 ⇒ 空状态按标点键乱出字（真机复现：
+    --   按双引号出「然」、问号+双引号出「微信号」、双引号+分号出「饕/听不懂」）。
+    --   加 `input ~= ""` 把「空状态预测候选」排除：走下方 else 分支正常出标点 /
+    --   交替引号，不再顶预测候选。打码中（input 非空）「顶候选+标点」功能不受影响。
+    if has_candidate_menu and input ~= "" then
         if base_key_value == "Left" or base_key_value == "Right" then
             return 2
         end
@@ -492,28 +516,29 @@ function processor.func(key, env)
         return 2
     else
         if composition:empty() then
-            -- ★ **移动端**把 `"` 和 `'` 放行给 punctuator 的 `pair`
+            -- ★ 引号 `"` `'` 放行给 punctuator 的 `pair`（交替：一次左、一次右）
             --   （symbols.yaml: '"' : { pair: [ '“', '”' ] } / ''': { pair: [ '‘', '’' ] }）
-            --   ⇒ 第 1 次出开的、第 2 次出闭的，正好是用户要的「一次左、一次右」。
-            --   留在 Lua 里处理就只能一次吐一对（光标还停在末尾）。
-            --   ⚠ PC 端保持原样（一次出一对），别为手机改坏桌面。
-            if is_mobile() and (base_key_value == "apostrophe" or base_key_value == "quotedbl") then
-                return 2
-            end
-
-            if base_key_value == "apostrophe" then
-                env.engine:commit_text(pairTable["apostrophe"][1] .. pairTable["apostrophe"][2])
-                env.last_processed_key = base_key_value
-                env.last_processed_time = current_time
-                context:clear()
-                return 1
-            end
-            
-            if base_key_value == "quotedbl" then
-                env.engine:commit_text(pairTable["quotedbl"][1] .. pairTable["quotedbl"][2])
-                env.last_processed_key = base_key_value
-                env.last_processed_time = current_time
-                context:clear()
+            --   ⇒ 第 1 次出左引号、第 2 次出右引号，光标自然停在符号后面，
+            --     不再「一次吐一对、光标停在末尾」。
+            --   ⚠ 2026-11-02 起 PC 端也统一走交替（此前 PC 硬编码「一次一对」，
+            --     用户反馈「光标不在中间很烦」；且 PC 原本与括号等其它成对符号、
+            --     与移动端行为不一致，现统一）。
+            if base_key_value == "apostrophe" or base_key_value == "quotedbl" then
+                -- ★ 2026-11-03 修复：空状态引号键不再放行给 punctuator 的 `pair`，
+                --   改为 Lua 直接交替上屏中文引号。
+                --   根因：单引号键（apostrophe，keycode 0x27）在 punctuator 的
+                --   punct_segmentor 里不会被匹配成 "punct" 段（反而 fallback 成
+                --   "raw" 段），导致「按引号键把英文单引号卡进编码栏、第 2 次才
+                --   吐右引号」；PC 物理双引号键 = Shift+apostrophe，keycode 同为
+                --   0x27，一样中招。Lua 按 key_char 交替，彻底绕开 punctuator。
+                --   ⚠ key_char 已含 shift 转换：单引号键→"'"、双引号键(Shift+')/quotedbl→'"'。
+                local is_single = (key_char == "'")
+                local left = is_single and "‘" or "“"
+                local right = is_single and "’" or "”"
+                env.quote_state = env.quote_state or {}
+                local out = (env.quote_state[key_char] == "left") and right or left
+                env.quote_state[key_char] = (env.quote_state[key_char] == "left") and "right" or "left"
+                env.engine:commit_text(out)
                 return 1
             end
             

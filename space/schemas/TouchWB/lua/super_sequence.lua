@@ -849,7 +849,11 @@ local function af_record(code, word, schema_id)
         local cur_max = af_max_seq(db, code)
         if oldseq ~= nil and oldseq >= cur_max then
             -- 已经是本编码最前 ⇒ 不动，避免退化成「谁最后上屏谁抢第一」
-            af_probe(string.format("AFREC 已存在·已最前·不刷新 rk=[%s] 原值=%d max=%d",
+            -- ★ 2026-11-02 修复：af_probe 在文件后部（918 行）才用 local 声明，
+            --   此处是前向引用（解析为全局 nil），真机报
+            --   "attempt to call a nil value (global 'af_probe')" 刷屏。
+            --   用 pcall 包裹：探针关闭（AF_PROBE_ON=false）时本就空操作，无功能损失。
+            pcall(af_probe, string.format("AFREC 已存在·已最前·不刷新 rk=[%s] 原值=%d max=%d",
                                    tostring(key), oldseq, cur_max))
             _af_stat.err = nil
             return false
@@ -859,7 +863,7 @@ local function af_record(code, word, schema_id)
         if ns <= _af_seq_hint then ns = _af_seq_hint + 1 end
         _af_seq_hint = ns
         local oku = pcall(function() db:update(key, "T" .. ns) end)
-        af_probe(string.format("AFREC 已存在·抬到最前 rk=[%s] %s→%d (max=%d) ok=%s",
+        pcall(af_probe, string.format("AFREC 已存在·抬到最前 rk=[%s] %s→%d (max=%d) ok=%s",
                                tostring(key), tostring(oldseq), ns, cur_max, tostring(oku)))
         _af_stat.err = nil
         return true

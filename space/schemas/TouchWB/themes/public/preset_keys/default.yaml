@@ -167,7 +167,7 @@ preset_keys:
   eisu_toggle_patch_speech_setting: { icon: "mic_circle.svg", label: "语音设置", send: Eisu_toggle, select: _patch_setting, option: [ "_speech_setting" ] }
   # 笔画过滤
   # 支持系统：鸿蒙
-  eisu_toggle_patch_speech_volcengine: { icon: "key_horizontal.svg", label: "豆包语音配置", send: Eisu_toggle, select: _patch_setting, option: [ "_speech_volcengine" ] }
+  eisu_toggle_patch_speech_volcengine: { icon: "key_horizontal.svg", label: "豆包语音配置", send: Eisu_toggle, select: _patch_setting, option: [ "_speech_volcengine" ], support: ['harmonyos'] }
   # 个性化语音热词：打开宿主热词页
   # 支持系统：鸿蒙
   eisu_toggle_personal_hotwords: { icon: "text_speaker_wave_rectangle.svg", label: "个性化热词", send: Eisu_toggle, select: _personal_hotwords }
@@ -346,7 +346,7 @@ preset_keys:
 
   #语音引擎
   # 支持系统：iOS
-  eisu_toggle_speech_list_board: { icon: "waveform.svg", label: "语音引擎", send: Eisu_toggle, select: _speech_list_board }
+  eisu_toggle_speech_list_board: { icon: "waveform.svg", label: "语音引擎", send: Eisu_toggle, select: _speech_list_board, support: ['harmonyos'] }
 
 
 
@@ -566,7 +566,7 @@ preset_keys:
 
   #vip
   # 支持系统：鸿蒙
-  function_common_open_vip: { type: command, icon: "vip_rectangle.svg", label: "vip", send: function, command: common.open_vip, option: "" }
+  function_common_open_vip: { type: command, icon: "vip_rectangle.svg", label: "vip", send: function, command: common.open_vip, option: "", support: ['harmonyos'] }
 
   #语音识别
   # 支持系统：鸿蒙

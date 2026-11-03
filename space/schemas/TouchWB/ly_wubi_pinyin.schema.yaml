@@ -192,6 +192,7 @@ engine:
     - lua_filter@*super_sequence*F         # 候选字词快捷键手动调序（移动设备send数字调序）
     - lua_filter@*smart_assoc*F         # 智能联想：/lxqk 清空 /lxzt 状态（放 S+F 之后）
     - lua_filter@*user_coined_cmd*F       # 自造词管理：/zcscN 删除 /zccx 撤销 /zcqk 清空
+    - lua_filter@*drop_sentence            # 丢弃整句切分候选（sentence），根除 tane→和世有/`xihuan→纱柴油机 等乱词
     - lua_filter@*wubi_pinyin_filter       # 重码筛选（第五码拼音首字母筛选），放在S+F之后，在已排序候选基础上筛选
     # 简化器：执行通用简化和过滤操作
     - simplifier
@@ -236,7 +237,7 @@ engine:
     - table_translator@fixed
     # 临时自造词翻译器
     - table_translator@mkst
-    - table_translator@mkst_pinyin         # 反引号段拼音筛字：`shou 也能选字（绕开不会打的字）
+    - reverse_lookup_translator@mkst_pinyin # 反引号段拼音：`shou 选字 / `pinyin 出词组（绕开不会打的字）
     - script_translator@wubi_prefix        # 为 wubi_pinyin_filter 提供第 5 码筛选支持（见文末 wubi_prefix 段说明）
     # 反查翻译器：支持拼音反查五笔编码
     - reverse_lookup_translator
@@ -303,29 +304,32 @@ translator:
 # 第五码筛选支持组件（script_translator@wubi_prefix）
 # ----------------------------------------------------------------
 # ⚠ 它不是拼音翻译器：读的是五笔字典 wubi.extended + 本方案的五笔棱镜，
-#   全程没有任何拼音参与。只是借用了「按音节图切分输入」这套机制。
+#   全程没有任何拼音参与。
 #
-# 为什么非它不可（实测，详见 14键双键拼音候选缺失-排查报告.md）：
-#   五笔码表最长 4 码。输入到第 5 码时，table_translator 既查不到精确码，
+# 为什么需要它（实测，详见 14键双键拼音候选缺失-排查报告.md）：
+#   五笔码表最长 4 码。输入到第 5 码时，主 table_translator 既查不到精确码，
 #   也查不到补全（补全的方向是「输入是编码的前缀」，而没有任何 5 字母编码
 #   以 taned 开头）⇒ 一条候选都不出。
-#   只有 script_translator 会把输入按词典音节图切开，产出「只吃掉前 1~4 码」
-#   的候选（start=0、end=1~4）；wubi_pinyin_filter 靠这个 _end 判断
+#   本组件靠 script_translator 的音节图切分，产出「只吃掉前 1~4 码」的 partial-span
+#   候选（type=phrase，start=0、end=1~4）；wubi_pinyin_filter 靠这个 _end 判断
 #   「第 5 码筛掉了哪些 4 码命中」（taned→物极必反、khlgg→中国/跨国/贵国）。
+#
+# ★ 2026-11-02 由 table_translator 回退到 script_translator：
+#   2026-11-01 曾改为 table_translator(enable_sentence:true) 以脱离 script_translator，
+#   但实测（sandbox_z_fffff_verify.py）暴露两个无法接受的失效：
+#   · 第五码 z 失效（26键+14键）：table_translator 的 MakeSentence 把整串（含 z）当五笔
+#     编码建图，z 不是字根 ⇒ CommonPrefixSearch("z") 空 ⇒ 整体返回空（tanez total=0）；
+#     script_translator 的音节图对任意字母（含 z 声母）都能切，故 z 正常。
+#   · 14键 fffff 失效：短码命中（封=fff）被 filter 的 #candidate_code<need(4) 误杀
+#     （此点已在 wubi_pinyin_filter.lua 单独修复，与 translator 类型无关）。
+#   音节切分带来的乱词已由 lua/drop_sentence.lua（丢弃 type=sentence 整句候选）根除，
+#   故 script_translator 的副作用可控。乱词根除与 translator 类型无关，drop_sentence 必须保留。
 #
 # ⚠ 不要删。删掉之后：
 #   · 5 码筛选整体失效：taned 出「坦然地」、tanef/taneg/khlgg/khlgz/
-#     wqvbh/wqvbn/fffff/nnnnn 全部变空；
-#   · 连 4 码及以下的候选集合都会变（实测 tane 19→7、khlg 10→7、
-#     wqvb 10→4、aawt 25→13、shua 9→4）—— 它早已是候选集合的一部分。
+#     wqvbh/wqvbn/fffff/nnnnn 全部变空。
 #
-# 换成 table_translator 也不行：实测结果和「删掉」完全一致。
-# Lua 自己也做不了：Lua 能拿到的 ReverseDb 是「字词→编码」方向
-#   （wubi.extended.reverse.bin 查「彻骨」得 tame），而这里需要的是
-#   「编码→字词」，Lua 侧根本没有这个索引。
-#
-# enable_completion: false 是刻意的（本组件也用不到补全），
-#   704 个别名变体 + 268 行回归逐字验证：与 true 完全一致、0 差异。
+# enable_completion: false 是刻意的（本组件也用不到补全）。
 # ================================================================
 wubi_prefix:
   # 使用的字典文件名
@@ -341,7 +345,7 @@ wubi_prefix:
     - "^z.*$"
   # 是否启用字符集过滤器（false=不启用，支持GBK扩展字符）
   enable_charset_filter: false
-  # 是否启用整句输入（false=不启用，仅支持词组输入）
+  # 是否启用整句输入（false：script_translator 用音节图切分产 partial-span，不依赖 enable_sentence）
   enable_sentence: false
   # 是否启用用户词典（false=不启用，不记录用户输入）
   enable_user_dict: false
@@ -459,22 +463,20 @@ mkst:
   tag: mkst
   tips: "〔自造词〕"
 
-# ★ 2026-10-31：反引号段拼音筛字（手动造词用拼音选字，绕开不会打的字）。
-#   与 mkst（五笔）共用同一反引号段（tag=mkst）：输入 `rt 走五笔、输入 `shou 走拼音。
+# ★ 2026-11-01：反引号段拼音（手动造词用拼音选字/出词组，绕开不会打的字）。
+#   与 mkst（五笔）共用同一反引号段（tag=mkst）：输入 `rt 走五笔、输入 `shou/`pinyin 走拼音。
+#   为什么用 reverse_lookup_translator 而不是 table_translator：
+#   table_translator 只做「编码精确匹配」，拼音字典里词组编码带空格（pin yin），
+#   整串 pinyin 精确匹配不上 ⇒ 词组永远为空；reverse_lookup_translator 走
+#   Syllabifier 音节图切分（与混输正常拼音输入同一套机制），单字 `shou、词组 `pinyin
+#   都能出。reverse_lookup 候选 quality 恒为 0，天然排在五笔 mkst(450) 之后 ——
+#   「反引号段五笔优先」的顺序由质量差自然保证，无需 initial_quality。
+#   comment 由 reverse 查表回填五笔编码（与混输正常拼音反查一致），造词时顺带可见编码。
 mkst_pinyin:
-  db_class: tabledb
-  dictionary: ly_pinyin
-  prism: ly_pinyin
-  prefix: "`"
-  tag: mkst
-  initial_quality: 400            # 低于五笔 mkst(450)：反引号段五笔候选优先
-  enable_completion: false
-  enable_sentence: false
-  enable_encoder: false
-  enable_user_dict: false
-  encode_commit_history: false
-  enable_charset_filter: false
-  max_phrase_length: 4
+  dictionary: ly_pinyin                # 与 reverse_lookup 同一个拼音字典
+  prism: ly_pinyin                     # ★ 26 键棱镜（14 键方案覆盖为 ly_pinyin_14）
+  tag: mkst                            # 与 mkst（五笔）共用同一反引号段
+  enable_completion: false             # false = 走 Syllabifier 音节切分（词组必需）
 
 # 样式配置（输入法界面样式）
 style:
