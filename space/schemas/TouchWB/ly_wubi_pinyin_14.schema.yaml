@@ -180,7 +180,7 @@ engine:
     - punct_translator
     - table_translator@pinyin_direct             # 拼音直查：候选流最前面的拼音候选（见文末 pinyin_direct 段）
     - table_translator
-    - lua_translator@user_coined_translator
+    - lua_translator@*user_coined_translator
     - table_translator@fixed
     - table_translator@mkst
     - reverse_lookup_translator@mkst_pinyin # 反引号段拼音：`shou 选字 / `pinyin 出词组（绕开不会打的字）

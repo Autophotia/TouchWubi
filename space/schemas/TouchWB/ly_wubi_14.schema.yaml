@@ -168,7 +168,7 @@ engine:
     - lua_translator@*user_coined_cmd*T   # 自造词管理：/zctj 统计与倒序列表
     - punct_translator
     - table_translator
-    - lua_translator@user_coined_translator
+    - lua_translator@*user_coined_translator
     - table_translator@fixed
     - table_translator@mkst
     - script_translator@wubi_prefix       # 为 wubi_pinyin_filter 提供第 5 码筛选支持（见文末 wubi_prefix 段说明）

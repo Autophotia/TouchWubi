@@ -222,8 +222,8 @@ engine:
     - punct_translator
     # 码表翻译器
     - table_translator
-    # Lua`键引导的手动造词翻译器（读取文本文件，即时生效，全局变量）
-    - lua_translator@user_coined_translator
+    # 手动造词翻译器（读取 C++ UserDb lua/user_coined，即时生效）
+    - lua_translator@*user_coined_translator
     # 用户词典翻译器（自动学习用户词组）
     - table_translator@fixed
     # 临时自造词翻译器

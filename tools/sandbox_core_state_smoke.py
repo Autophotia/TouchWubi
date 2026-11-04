@@ -165,6 +165,12 @@ def main():
         "lua/super_sequence.lua": "lua/super_sequence.lua",
         "lua/input_statistics.lua": "lua/input_statistics.lua",
         "lua/calc_symbol_processor.lua": "lua/calc_symbol_processor.lua",
+        "lua/user_coined_translator.lua": "lua/user_coined_translator.lua",
+        # 2026-11-04：translator 迁 * 前缀，4 个五笔 schema 的注册行改了，须同步叠加
+        "ly_wubi.schema.yaml": "ly_wubi.schema.yaml",
+        "ly_wubi_14.schema.yaml": "ly_wubi_14.schema.yaml",
+        "ly_wubi_pinyin.schema.yaml": "ly_wubi_pinyin.schema.yaml",
+        "ly_wubi_pinyin_14.schema.yaml": "ly_wubi_pinyin_14.schema.yaml",
     }
     print("[*] 叠加 dev 改动文件：")
     for rel, src_rel in overlay.items():
@@ -188,6 +194,24 @@ def main():
             with open(core_path, "w", encoding="utf-8") as f:
                 f.write(s2)
             print("[*] 已注入 debug_tags = { assoc = true }（针对性调试验证）")
+
+    # 改了 4 个五笔 schema 的 translator 列表（* 前缀）。沙盒里 librime 不重编译 schema，
+    # 直接改 build 里编译产物那一行（lua_translator@user_coined_translator -> * 前缀），
+    # 否则仍用旧的 _G 注册（而 _G 导出已删 ⇒ 找不到组件）。不能删 build/schema.yaml——
+    # 沙盒不会重新编译，删除后 schema 加载失败、候选全空。
+    for sid in ["ly_wubi", "ly_wubi_14", "ly_wubi_pinyin", "ly_wubi_pinyin_14"]:
+        bp = os.path.join(user_dir, "build", sid + ".schema.yaml")
+        if os.path.exists(bp):
+            with open(bp, "r", encoding="utf-8") as f:
+                s = f.read()
+            s2 = s.replace('lua_translator@user_coined_translator',
+                           'lua_translator@*user_coined_translator')
+            if s2 == s:
+                print(f"    ⚠ build/{sid}.schema.yaml 未找到旧注册行（格式可能不同）")
+            else:
+                with open(bp, "w", encoding="utf-8") as f:
+                    f.write(s2)
+                print(f"    已改 build/{sid}.schema.yaml：-> *user_coined_translator")
 
     # 确认核心文件就位
     for rel in ["lua/core.lua", "lua/types.lua", "lua/smart_assoc.lua", "lua/pair_punct.lua",
