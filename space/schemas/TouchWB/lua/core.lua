@@ -32,6 +32,11 @@ core.state = {
     -- 联想预测标志（原 _G.__touchwb_assoc_predicting）
     -- 状态：自 S88 起写点随长按语音代码被删、仅剩读点，已空转。保留字段位以对照历史。
     assoc_predicting = false,
+
+    -- 统一调试总开关（原各模块零散的 DEBUG_LOG / DEBUG_KEY_LOG / DEBUG_COIN_LOG）
+    -- 默认 false（正式版静默）；测试时用命令 /dbg 切换，或临时改 DEFAULT_DEBUG 后重部署。
+    -- 写点：core.toggle_debug()（/dbg 命令）；读点：core.dbg() 门控。
+    debug = false,
 }
 
 -- ============================================================================
@@ -140,5 +145,69 @@ function core.is_mobile()
 
     return _mobile
 end
+
+-- ============================================================================
+-- == 统一调试日志 core.dbg（2026-11-04）==
+-- ============================================================================
+-- 取代各模块零散的 DEBUG_LOG / DEBUG_KEY_LOG / DEBUG_COIN_LOG 布尔开关，
+-- 让一个 /dbg 命令就能点亮所有模块的调试输出（测试成品时快速定位问题）。
+-- 双通道输出：
+--   ① rime 日志 log.info —— 真机（鸿蒙超越）只有**第一个参数**会进日志，
+--      故把整条日志拼进第一个参数，前缀 [TW]。
+--   ② 用户目录 touchwb_debug.log —— PC/移动端用户数据目录均可写，按时间戳追加。
+-- 用法：core.dbg("assoc", "foo=%s bar=%d", s, n)  （首参带 % 走 string.format）
+--       core.dbg("assoc", "a", "b", 123)           （多参数拼接）
+local DEBUG_FILE = "touchwb_debug.log"
+
+local function dbg_str(v)
+    if type(v) == "table" then
+        local t = {}
+        for k, val in pairs(v) do t[#t + 1] = tostring(k) .. "=" .. tostring(val) end
+        return "{" .. table.concat(t, ",") .. "}"
+    end
+    return tostring(v)
+end
+
+function core.dbg(tag, ...)
+    if not core.state.debug then return end
+    local n = select("#", ...)
+    if n == 0 then return end
+    local first = select(1, ...)
+    local msg
+    if n > 1 and type(first) == "string" and first:find("%%") then
+        local ok, s = pcall(string.format, ...)
+        msg = (ok and s ~= nil) and s or first
+    else
+        local parts = {}
+        for i = 1, n do parts[i] = dbg_str(select(i, ...)) end
+        msg = table.concat(parts, " ")
+    end
+    local line = os.date("%H:%M:%S") .. " [" .. tostring(tag) .. "] " .. msg
+    -- 通道①：rime 日志（真机只有第一个参数会进日志，故拼进第一个参数）
+    pcall(function() if log and log.info then log.info("[TW] " .. line) end end)
+    -- 通道②：用户目录文件
+    pcall(function()
+        local dir = rime_user_dir()
+        if dir ~= "" then
+            local f = io.open(dir .. "/" .. DEBUG_FILE, "a")
+            if f then f:write(line .. "\n"); f:close() end
+        end
+    end)
+end
+
+function core.dbg_enabled() return core.state.debug == true end
+
+function core.toggle_debug()
+    core.state.debug = not core.state.debug
+    return core.state.debug
+end
+
+-- ============================================================================
+-- == 输入统计上报钩子 core.stats_report（原 _G.InputStats_Report）==
+-- ============================================================================
+-- 写点：input_statistics.lua 模块加载时注入 report_commit_text。
+-- 读点：Submit_text.lua 快捷上屏（空格/分号/引号）后补计数。
+-- 注意：这是「跨模块函数注入」，非瞬时状态信号，故挂在 core 上而非 core.state。
+core.stats_report = nil
 
 return core

@@ -22,6 +22,7 @@
 --   开始临时统计：/ks     - 开始临时统计会话
 --   结束临时统计：/js     - 结束临时统计并生成报告
 --   退出临时统计：/tc     - 退出临时统计（不生成报告）
+--   调试开关：    /dbg    - 切换全方案统一调试日志（core.dbg，见 core.lua）
 --
 -- 特性：
 --   📊 支持日、周、月、年多维度统计
@@ -452,8 +453,9 @@ local function report_commit_text(commit_text)
     debounced_save_stats(STATS_SCHEMA_ID)
 end
 
--- 暴露到全局，供 Submit_text.lua 的快捷上屏（空格/分号/引号）补计数
-_G.InputStats_Report = report_commit_text
+-- 注入到 core（替代原 _G.InputStats_Report），供 Submit_text.lua 的快捷上屏
+-- （空格/分号/引号）补计数。core.stats_report 见 core.lua 注释。
+core.stats_report = report_commit_text
 
 -- 序列化工具
 local function serialize_table(tbl, indent)
@@ -804,7 +806,11 @@ local function translator(input, seg, env)
     end
     
     -- 命令处理
-    if input == "/tj" then
+    if input == "/dbg" then
+        -- 统一调试总开关（跨模块，见 core.dbg）：切换后各模块 core.dbg 输出全开/全关
+        local on = core.toggle_debug()
+        yield(create_message_candidate(seg, on and "🐞 调试日志已开启（touchwb_debug.log）" or "🐞 调试日志已关闭"))
+    elseif input == "/tj" then
         flush_current_segment()
         local daily = format_daily_summary(schema_name)
         local weekly = format_weekly_summary(schema_name)

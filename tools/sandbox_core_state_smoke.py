@@ -220,8 +220,34 @@ def main():
     dump(get_context(lib, sid), "/tj")
     press(lib, sid, " ")
 
+    # 调试开关：/dbg 切换 core.state.debug（验证 core.dbg 统一日志 + 文件输出）
+    print("\n=== 调试命令 /dbg（切换 core.state.debug）===")
+    press(lib, sid, "/dbg")
+    dump(get_context(lib, sid), "/dbg on")
+    press(lib, sid, " ")
+    # 开 debug 后打一串码 + 标点，触发各模块 core.dbg 写日志
+    press(lib, sid, "fcu")
+    press(lib, sid, " ")
+    press(lib, sid, ";")
+    # 再关掉
+    press(lib, sid, "/dbg")
+    dump(get_context(lib, sid), "/dbg off")
+    press(lib, sid, " ")
+
     lib.RimeDestroySession(sid)
     lib.RimeFinalize()
+
+    # 检查统一调试日志文件是否生成（core.dbg 通道②：用户目录 touchwb_debug.log）
+    print("\n=== touchwb_debug.log 检查 ===")
+    dbg_log = os.path.join(user_dir, "touchwb_debug.log")
+    if os.path.exists(dbg_log):
+        with open(dbg_log, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().strip().splitlines()
+        print(f"  已生成 {dbg_log}，共 {len(lines)} 行：")
+        for ln in lines[:8]:
+            print(f"     {ln[:140]}")
+    else:
+        print(f"  ⚠ 未生成 {dbg_log}（core.dbg 文件通道可能未触发，需人工确认）")
 
     # 检查日志里的 Lua 错误
     print("\n=== 日志检查 ===")

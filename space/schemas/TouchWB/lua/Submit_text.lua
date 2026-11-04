@@ -83,23 +83,19 @@ local core = require "core"
 --   Lua 侧唯一该做的，就是别碰空格。原先「扣住空格给长按」的思路本身就是错的。
 
 -- =================================================================
--- == 造词专用日志（低音量开关，默认关）==
+-- == 造词专用日志（统一走 core.dbg，由 /dbg 开关门控，见 core.lua）==
 -- =================================================================
-local DEBUG_COIN_LOG = false
 local function kcoin(tag, msg)
-    if not DEBUG_COIN_LOG then return end
-    pcall(function() if log and log.info then log.info("[COIN:" .. (tag or "?") .. "] " .. (msg or "")) end end)
+    core.dbg("COIN:" .. (tag or "?"), msg or "")
 end
 
 -- ★ 移动端判定：统一走 core.is_mobile()（2026-11-04 去重，见 core.lua）。
 --   用途：把「分号上屏第二候选 / 单引号上屏第三候选」这两个 PC 习惯快捷键
 --   在手机上关掉（手机上点候选栏更快，这两个键会被截胡，纯添乱）。
 
--- ★ 逐键调试日志开关（默认关）。
-local DEBUG_KEY_LOG = false
+-- ★ 逐键调试日志（统一走 core.dbg，由 /dbg 开关门控）。
 local function klog(tag, msg)
-    if not DEBUG_KEY_LOG then return end
-    pcall(function() if log and log.info then log.info(tag .. " " .. msg) end end)
+    core.dbg(tag, msg)
 end
 
 -- =================================================================
@@ -298,7 +294,7 @@ local function commit_text_processor(key, env)
         if sel and sel.text and sel.text ~= "" then
             context:clear()
             engine:commit_text(sel.text)
-            if _G.InputStats_Report then _G.InputStats_Report(sel.text) end
+            if core.stats_report then core.stats_report(sel.text) end
             return 1
         end
     end
@@ -315,7 +311,7 @@ local function commit_text_processor(key, env)
             klog("Submit_text", "committing 3rd candidate: " .. env.last_3th_text.text)
             context:clear()
             engine:commit_text(env.last_3th_text.text)
-            if _G.InputStats_Report then _G.InputStats_Report(env.last_3th_text.text) end
+            if core.stats_report then core.stats_report(env.last_3th_text.text) end
             return 1
         end
     end
@@ -327,7 +323,7 @@ local function commit_text_processor(key, env)
             klog("Submit_text", "committing 2nd candidate: " .. env.last_2th_text.text)
             context:clear()
             engine:commit_text(env.last_2th_text.text)
-            if _G.InputStats_Report then _G.InputStats_Report(env.last_2th_text.text) end
+            if core.stats_report then core.stats_report(env.last_2th_text.text) end
             return 1
         end
     end

@@ -55,11 +55,13 @@
 --
 -- ★ 本模块只新增一个处理器（lua_processor@*auto_coined*P），不改动任何现有逻辑；
 --   开关 auto_coined 关（默认）时 P.func 直接放行，零开销。
--- ★ DEBUG_LOG：排查时改为 true，INFO 日志会逐条打印「检测到提交 / 造了哪些词 / 是否撞码」。
+-- ★ 调试日志：走 core.dbg，由 /dbg 命令统一开关（见 core.lua），逐条打印
+--   「检测到提交 / 造了哪些词 / 是否撞码」。
 -- ============================================================================
 
 -- ★ 2026-11-04 模块化重构：造词数据服务从 Submit_text.lua 的 _G 导出改为显式 require。
 local db = require "user_coined_db"
+local core = require "core"
 
 local MAX_PHRASE       = 5     -- 临时词窗口：相邻 ≤5 条连续提交
 local HIST_KEEP        = 6     -- _hist 缓冲保留条数（≥ MAX_PHRASE 即可）
@@ -78,7 +80,6 @@ local PHRASE_GAP_SEC   = 120   -- 两次提交间隔超过此秒数 ⇒ 认为�
 local DELETE_THRESHOLD = 200   -- 临时词超过 200 次提交仍未被召回转正 ⇒ 淘汰
 local MAX_TEMP_ENTRIES = 300   -- 临时词总量上限，超出则淘汰最旧的
 local CLEANUP_EVERY    = 30    -- 每 30 次提交触发一次惰性清理
-local DEBUG_LOG        = false -- 逐键诊断日志（造词功能已闭环，默认关；排查时改 true）
 
 local AUTO_HEADER = {
     "# 自动连词造词的临时词库（勿手工编辑）",
@@ -114,10 +115,9 @@ local function is_escape(repr, kc)
     return n == 0xFF1B or n == 27
 end
 
--- ---- 诊断日志（真机 log.info 只接收第一个参数，故信息全部拼进去） ----
+-- ---- 诊断日志（统一走 core.dbg，由 /dbg 开关门控） ----
 local function klog(tag, msg)
-    if not DEBUG_LOG then return end
-    pcall(function() if log and log.info then log.info(tag .. " " .. msg) end end)
+    core.dbg(tag, msg)
 end
 
 -- ---- 运行态（进程级，跨按键保留） ----

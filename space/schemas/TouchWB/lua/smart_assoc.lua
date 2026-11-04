@@ -367,28 +367,11 @@ local _last_ctx = nil
 local _fixed = nil
 local _fixed_tried = false
 
--- 调试日志开关：置 true 时把关键流程写进日志（排查完置回 false）
--- ★ 两条输出通道，原因：
---     ① log.info(tag, msg) —— 真机（鸿蒙超越）**只有第一个参数 tag 会进日志**
---        （实测：Submit_text.lua 的 log.info("Submit_text","input_text=..") 在
---        全部拼进**第一个参数**，第二个参数会被丢掉。
---     ② 写文件 —— 只在 PC（小狼毫）上有效，手机上没有可写路径，两个都留着。
-local DEBUG_LOG = false     -- ★ 2026-09-27 真机三大问题全部验证通过，关闭调试日志
-local LOG_PATH = "C:/Users/xoaii/AppData/Local/Temp/assoc_dbg.txt"
+-- 调试日志：统一走 core.dbg（tag="assoc"），由 /dbg 命令开关门控（见 core.lua）。
+--   原两条输出通道（log.info 首参 + PC 文件）已并入 core.dbg 双通道，语义不变；
+--   probe（下方）仍是独立的「临时取证」深诊断通道，两套机制互补、互不干扰。
 local function dbg(fmt, ...)
-    if not DEBUG_LOG then return end
-    local msg = fmt
-    if select("#", ...) > 0 then
-        local ok, s = pcall(string.format, fmt, ...)
-        if ok and s then msg = s end
-    end
-    msg = "[assoc] " .. msg
-    pcall(function() if log and log.info then log.info(msg) end end)
-    -- 通道②：PC 文件
-    pcall(function()
-        local f = io.open(LOG_PATH, "a")
-        if f then f:write(msg .. "\n"); f:close() end
-    end)
+    core.dbg("assoc", fmt, ...)
 end
 
 -- ============================================================
@@ -2514,7 +2497,7 @@ function T.fini(env) end
 function T.func(input, seg, env)
     if input == nil then return end
     -- S60 取证：predictor 空段上本函数到底收到什么 input / 数据与时机如何。
-    --   ★ 必须走 probe 而不是 dbg —— dbg 受 DEBUG_LOG=false 门控，真机静默。
+    --   ★ 必须走 probe 而不是 dbg —— dbg 受 core.state.debug 门控，默认关、真机静默。
     if PROBE_ON then
         probe(string.format("T.func in=%q pend=%s ready=%s seg=[%d,%d]",
             tostring(input), tostring(pending_cands ~= nil),
