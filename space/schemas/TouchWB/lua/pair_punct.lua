@@ -10,30 +10,12 @@ local processor = {}
 local segmentor = {}
 
 -- ★ 2026-11-03 诊断开关：排查「上屏后按标点乱出字」用，定位后改回 false。
-_G.__touchwb_punct_dbg = false
+--   （2026-11-04 已迁至 core.state.punct_dbg，见 core.lua）
+local core = require "core"
 
--- ★ 移动端判定（与 smart_assoc.lua 完全同款实现）
+-- ★ 移动端判定：统一走 core.is_mobile()（2026-11-04 去重，见 core.lua）。
 --   用途：26 键 K/L 下滑要走 punctuator 的 pair（左右交替出单个符号），
 --         而 PC 端保留「一次出一对」的老行为，互不干扰。
-local _mobile = nil
-local function is_mobile()
-    if _mobile ~= nil then return _mobile end
-    _mobile = false
-    if jit and jit.os then
-        local o = (jit.os or ""):lower()
-        if o:find("android") or o:find("harmony") then _mobile = true; return _mobile end
-    end
-    pcall(function()
-        local d = ((rime_api.get_user_data_dir() or "") .. " " ..
-                   (rime_api.get_shared_data_dir() or "")):lower()
-        if d:find("/data/storage/el%d") or d:find("/android/") or d:find("/storage/emulated/")
-            or d:find("/sdcard/") or d:find("/harmony") or d:find("/hap/")
-            or d:find("/space/") or d:find("/storage/users/") then
-            _mobile = true
-        end
-    end)
-    return _mobile
-end
 
 function get_selected_candidate_index(key_value, selected_index, page_size)
 	local key_name = key_value
@@ -351,7 +333,7 @@ function processor.func(key, env)
     --   return 1 即截断链条。
     -- ⚠ PC 端 is_mobile()==false，完全不进这个分支，二选 / 三选快捷键行为不变。
     -- ⚠ 空状态（没在打码）不进这里，`;` `'` 仍走原逻辑（移动端引号还保留 pair 左右交替）。
-    if is_mobile() and (key_char == ";" or key_char == "'") and input ~= "" then
+    if core.is_mobile() and (key_char == ";" or key_char == "'") and input ~= "" then
         local m_sel = context:get_selected_candidate()
         local m_txt = (m_sel and m_sel.text) or ""
         local m_punct = (key_char == ";") and "；" or "’"
@@ -363,7 +345,7 @@ function processor.func(key, env)
     local has_candidate_menu = context:has_menu()
 
     -- ★ 2026-11-03 诊断：临时打印标点决策现场（排查后关掉 _G.__touchwb_punct_dbg）
-    if _G.__touchwb_punct_dbg then
+    if core.state.punct_dbg then
         local _top = ""
         pcall(function() local c = context:get_selected_candidate(); if c and c.text then _top = c.text end end)
         pcall(function()
@@ -439,12 +421,12 @@ function processor.func(key, env)
     --   ' / " 卡进编码栏、以「单候选菜单」形式显示（用户本次反馈的现象）。
     --   引号键在空状态下本应走下方 QUOTEFIX 分支（Lua 直接交替上屏中文引号），
     --   故在此排除引号键，让它们继续往下，不被这个豁免拦截。
-    if _live_in == "" and _G.__touchwb_assoc_seg and base_key_value ~= "apostrophe" and base_key_value ~= "quotedbl" then
+    if _live_in == "" and core.state.assoc_seg and base_key_value ~= "apostrophe" and base_key_value ~= "quotedbl" then
         -- S90 探针：只累计数，日志由 smart_assoc 的 P.func 统一打印
-        _G.__touchwb_punct_exempt = (_G.__touchwb_punct_exempt or 0) + 1
+        core.state.punct_exempt = (core.state.punct_exempt or 0) + 1
         return 2
     end
-    _G.__touchwb_punct_exempt = 0
+    core.state.punct_exempt = 0
 
     -- ★ S118 标点规则（用户 2026-10-12 定）：
     --   · 全角标点：仅打码中「顶当前候选 + 标点」上屏，其它时候清联想只出标点（下方原有逻辑已实现）。

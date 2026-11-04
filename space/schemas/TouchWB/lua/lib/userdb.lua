@@ -1,3 +1,6 @@
+-- ★ 2026-11-04 类型注解：本文件引用的 UserDb / DbAccessor 类型定义于 lua/types.lua
+--   （librime-lua 类型定义库）。LuaLS 全局索引 @class 注解即可解析，无需运行时 require。
+--   运行时构造器仍用 librime-lua 注入的全局 UserDb(db_name, db_class)，语义不变。
 local META_KEY_PREFIX = "\001" .. "/"
 
 -- UserDb 缓存，使用弱引用表，不阻止垃圾回收并能自动清理

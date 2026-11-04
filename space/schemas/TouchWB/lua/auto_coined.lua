@@ -58,6 +58,9 @@
 -- ★ DEBUG_LOG：排查时改为 true，INFO 日志会逐条打印「检测到提交 / 造了哪些词 / 是否撞码」。
 -- ============================================================================
 
+-- ★ 2026-11-04 模块化重构：造词数据服务从 Submit_text.lua 的 _G 导出改为显式 require。
+local db = require "user_coined_db"
+
 local MAX_PHRASE       = 5     -- 临时词窗口：相邻 ≤5 条连续提交
 local HIST_KEEP        = 6     -- _hist 缓冲保留条数（≥ MAX_PHRASE 即可）
 -- ★ 2026-10-29 修复「第一个字不参与造词」：真机实测打一串字，第一个字（尤其生僻字
@@ -155,7 +158,7 @@ end
 
 -- ---- 依赖的全局（由 Submit_text.lua / 引擎提供） ----
 local function stdcode(phrase)
-    local f = _G.auto_coined_stdcode
+    local f = db.generate_standard_code
     if type(f) ~= "function" then return "" end
     local ok, c = pcall(f, phrase)
     return (ok and c) and c or ""
@@ -165,7 +168,7 @@ end
 --   由 Submit_text.lua 暴露的 auto_coined_in_main_dict 判断（字典懒加载，O(1)）。
 --   拿不到该函数（模块未加载 / 字典未就绪）时返回 false ⇒ 退化为「照旧造词」，绝不漏造。
 local function in_main_dict(phrase)
-    local f = _G.auto_coined_in_main_dict
+    local f = db.main_dict_has_phrase
     if type(f) ~= "function" then return false end
     local ok, r = pcall(f, phrase)
     return (ok and r) == true
@@ -178,21 +181,21 @@ end
 
 -- 读临时词 list（等价原 read_rows(get_path())；元素 { text, code, tick }）
 local function read_temp_rows()
-    local f = _G.UserCoined_DB_ListTemp
+    local f = db.uc_list_temp
     if type(f) ~= "function" then return {} end
     local ok, rows = pcall(f)
     return (ok and rows) and rows or {}
 end
 
 local function put_temp(text, code, tick)
-    local f = _G.UserCoined_DB_PutTemp
+    local f = db.uc_put_temp
     if type(f) ~= "function" then return false end
     local ok = pcall(f, text, code, tick)
     return ok == true
 end
 
 local function erase_temp(text, code)
-    local f = _G.UserCoined_DB_EraseTemp
+    local f = db.uc_erase_temp
     if type(f) ~= "function" then return false end
     local ok = pcall(f, text, code)
     return ok == true
@@ -201,7 +204,7 @@ end
 -- 手动词库快照：exist 集合（等价原 snapshot_manual；数据来自 UserDb 永久词）
 local function snapshot_manual()
     local exist = {}
-    local f = _G.UserCoined_DB_ListManual
+    local f = db.uc_list_manual
     if type(f) == "function" then
         local ok, rows = pcall(f)
         if ok and rows then
@@ -217,8 +220,8 @@ end
 local function promote(text, code)
     local ok = false
     pcall(function()
-        if type(_G.UserCoined_AppendManual) == "function" then
-            ok = _G.UserCoined_AppendManual(text, code)
+        if type(db.append_manual) == "function" then
+            ok = db.append_manual(text, code)
         end
     end)
     klog("auto_coined", "promote [" .. text .. "]=" .. code .. " ok=" .. tostring(ok))
@@ -470,8 +473,8 @@ local function P_func(key_event, env)
     --   UserCoined_ReleaseDict）。释放放在 return 2 之前，关开关后的第一键就会触发。
     if _was_on and not on then
         pcall(function()
-            if type(_G.UserCoined_ReleaseDict) == "function" then
-                _G.UserCoined_ReleaseDict()
+            if type(db.release_dict) == "function" then
+                db.release_dict()
             end
         end)
     end

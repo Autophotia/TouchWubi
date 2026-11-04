@@ -43,6 +43,9 @@
 -- input 与上一帧相同 ⇒ 说明 compose 重跑了（翻页、重绘），此时：
 --   ① 绝不重复执行删除（否则会连删两条）；
 --   ② 把上次的结果候选再吐一条，用户不至于看不到执行结果。
+-- ★ 2026-11-04 模块化重构：造词数据服务从 Submit_text.lua 的 _G 导出改为显式 require。
+local db = require "user_coined_db"
+
 local _prev_input = nil
 local _last_res = nil
 
@@ -85,20 +88,20 @@ end
 -- ============================================================
 local function db_migrate()
     pcall(function()
-        if type(UserCoined_DB_Migrate) == "function" then UserCoined_DB_Migrate() end
+        if type(db.uc_migrate_once) == "function" then db.uc_migrate_once() end
     end)
 end
 
 -- 倒序永久词 list（元素 { text, code, seq }，seq 降序 = 最近在前）
 local function db_list_manual()
-    local f = _G.UserCoined_DB_ListManual
+    local f = db.uc_list_manual
     if type(f) ~= "function" then return {} end
     local ok, rows = pcall(f)
     return (ok and rows) and rows or {}
 end
 
 local function db_erase_manual(text, code)
-    local f = _G.UserCoined_DB_EraseManual
+    local f = db.uc_erase_manual
     if type(f) ~= "function" then return false end
     local ok = pcall(f, text, code)
     return ok == true
@@ -106,14 +109,14 @@ end
 
 -- true = 新增成功；false = 已存在或失败
 local function db_put_manual(text, code)
-    local f = _G.UserCoined_DB_PutManual
+    local f = db.uc_put_manual
     if type(f) ~= "function" then return false end
     local ok = pcall(f, text, code)
     return ok == true
 end
 
 local function db_clear_manual()
-    local f = _G.UserCoined_DB_ClearManual
+    local f = db.uc_clear_manual
     if type(f) ~= "function" then return false end
     local ok = pcall(f)
     return ok == true

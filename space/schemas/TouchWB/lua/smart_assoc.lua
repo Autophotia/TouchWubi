@@ -323,14 +323,16 @@ local _assoc_ready = false
 --     `get_property("assoc_predicting")` 这条通道在部分 librime-lua
 --     版本上取不到，留着只会让人误以为有第二条通道。
 --     本轮实测（tools/sandbox_s90_punct.py ❷a/❷b）确认：写点与读点已全部空转。
-local ASSOC_SEG_FLAG = "__touchwb_assoc_seg"
+-- ★ 2026-11-04 模块化重构：跨组件信号从 `_G` 迁到 `core.state`（纯内存状态表）。
+--   原 ASSOC_SEG_FLAG = "__touchwb_assoc_seg" 常量已废弃，直接读写 core.state.assoc_seg。
+local core = require "core"
 
 -- ★ S90 探针用：本轮进 P.func 时是否处于联想段（模块级，供函数尾部读取）
 local _was_assoc_seg = false
 
 --- 置位/清除「当前处于联想段」（供 pair_punct / super_sequence 判据用）
 local function mark_assoc_seg(on)
-    rawset(_G, ASSOC_SEG_FLAG, on and true or nil)
+    core.state.assoc_seg = on and true or nil
 end
 
 -- ★★★★★ S84：上一句的上下文快照（空段轮次的唯一可用数据源）
@@ -1135,27 +1137,7 @@ end
 --   移动端：数字键 = 想输入这个数字（选候选靠点击候选栏）
 --   PC 端  ：数字键 = 选第 N 个候选
 -- 联想状态下不管的话，移动端下滑的数字会被 super_sequence 当成手动调频吃掉。
--- 判据与 super_sequence.lua 的 is_mobile_device() 保持一致（鸿蒙 /data/storage/elN、
--- /space/、/harmony/…），这里只取最关键几条。
-local _mobile = nil
-local function is_mobile()
-    if _mobile ~= nil then return _mobile end
-    _mobile = false
-    if jit and jit.os then
-        local o = (jit.os or ""):lower()
-        if o:find("android") or o:find("harmony") then _mobile = true; return _mobile end
-    end
-    pcall(function()
-        local d = ((rime_api.get_user_data_dir() or "") .. " " ..
-                   (rime_api.get_shared_data_dir() or "")):lower()
-        if d:find("/data/storage/el%d") or d:find("/android/") or d:find("/storage/emulated/")
-            or d:find("/sdcard/") or d:find("/harmony") or d:find("/hap/")
-            or d:find("/space/") or d:find("/storage/users/") then
-            _mobile = true
-        end
-    end)
-    return _mobile
-end
+-- ★ 移动端判定统一走 core.is_mobile()（2026-11-04 去重，见 core.lua）。
 
 -- ★ S88：原先这里有 `ASSOC_FLAG` + `mark_predicting()` 一整套「共享联想态标志」
 --   （写 _G 全局 + ctx:set_property 双通道），配合 Submit_text 的空格豁免使用。
@@ -1217,7 +1199,7 @@ local function enabled(ctx)
     local ok, v = pcall(function() return ctx:get_option("smart_assoc") end)
     if ok and v == false then return false end
     -- ★ S77：非移动端一律关闭，不再看 assoc_pc 开关（该开关已删）
-    if not is_mobile() then return false end
+    if not core.is_mobile() then return false end
     return true
 end
 
@@ -1692,7 +1674,7 @@ function P.init(env)
         probe(string.format("smart_assoc=%s prediction=%s mobile=%s",
             tostring(ctx_get_option_safe(env, "smart_assoc")),
             tostring(ctx_get_option_safe(env, "prediction")),
-            tostring(is_mobile())))
+            tostring(core.is_mobile())))
     end
 end
 
@@ -2085,7 +2067,7 @@ function P.func(key_event, env)
     --   必须在任何 clear_assoc 之前取 —— P.func 自己会清标志，
     --   等 P.func 返回后 pair_punct 再看就已经是 false 了，
     --   而这恰恰是「清空因为时序没生效」时唯一还留有信息的一拍。
-    _was_assoc_seg = _G.__touchwb_assoc_seg and true or false
+    _was_assoc_seg = core.state.assoc_seg and true or false
     _engine = env.engine              -- clear_assoc 的备用刷新手段要用
     _suppress_settle = false         -- 上一次按键若没消费掉，别带到这一次
     _ctx = ctx                       -- 给 fixed_on() 读开关用
@@ -2130,7 +2112,7 @@ function P.func(key_event, env)
             "SWAP#%03d sa=%s⇒显示[%s] pd=%s⇒显示[%s] af=%s enabled=%s mobile=%s kc=%s",
             _probe_tick, tostring(sa), (sa == "true" and "方案联想" or "应用联想"),
             tostring(pd), (pd == "true" and "总联想开" or "总联想关"),
-            tostring(af), tostring(enabled(ctx)), tostring(is_mobile()), tostring(kcx)))
+            tostring(af), tostring(enabled(ctx)), tostring(core.is_mobile()), tostring(kcx)))
     end
 
     -- ★★★ S91：联想段状态改为「现场判定」+ 联想段下滑数字直接上屏 ★★★
@@ -2180,7 +2162,7 @@ function P.func(key_event, env)
     -- 情况 2：联想候选栏上按数字 = 用户想输入这个数字，**不是**选第 N 个候选。
     --   必须在这里自己 commit：放行（kNoop）会让键一路落到 selector，
     --   而 selector 的语义就是「选中第 N 个候选」⇒ 联想词被顶上屏。
-    if _live_assoc and is_mobile() then
+    if _live_assoc and core.is_mobile() then
         local _kd = -1
         pcall(function() _kd = key_event.keycode end)
         local _dig = nil
@@ -2510,8 +2492,8 @@ if true then  -- 占位符路已废弃(S80)：输入码永不含 ›，原 not i
     if PROBE_ON then
         probe(string.format(
             "S90 进P.func was_seg=%s 标志=%s punct_exempt=%d in=%q",
-            tostring(_was_assoc_seg), tostring(_G.__touchwb_assoc_seg),
-            tonumber(_G.__touchwb_punct_exempt) or 0, tostring(ctx.input)))
+            tostring(_was_assoc_seg), tostring(core.state.assoc_seg),
+            tonumber(core.state.punct_exempt) or 0, tostring(ctx.input)))
     end
     return 2
 end

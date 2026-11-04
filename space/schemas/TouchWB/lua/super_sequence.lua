@@ -107,119 +107,15 @@ local function is_function_mode_active(context)
         seg:has_tag("Ndate")         -- shijian.lua N日期功能
 end
 
+-- ★ 移动端判定统一走 core.is_mobile()（2026-11-04 去重，见 core.lua）。
+local core = require "core"
+
 -- 更可靠的 iOS 检测
 local function is_ios_device()
     return os.getenv("HOME") and os.getenv("HOME"):find("/var/mobile/") ~= nil
 end
 
--- 检测是否为移动端（Trime / Hamster / 超越输入法等）
--- 自动检测是否为移动设备（智能平台检测）
--- 支持的输入法：同文(Trime)、仓(Hamster)、超越输入法(Beyond)、鸿蒙系统等
-local function is_mobile_device()
-    -- 获取路径（支持 rime_api 和回退到环境变量）
-    local user_data_dir = ""
-    local shared_data_dir = ""
-    local dist = ""
-    local dist_name = ""
-
-    if rime_api then
-        user_data_dir = rime_api.get_user_data_dir() or ""
-        shared_data_dir = rime_api.get_shared_data_dir() or ""
-        dist = rime_api.get_distribution_code_name() or ""
-        dist_name = rime_api.get_distribution_name() or ""
-    end
-
-    local lower_dist = dist:lower()
-    local dist_name_lower = dist_name:lower()
-    local lower_path = user_data_dir:lower()
-    local sys_lower_path = shared_data_dir:lower()
-    local home = (os.getenv("HOME") or ""):lower()
-
-    -- 1. 已知移动端输入法（distribution_code_name）
-    if lower_dist == "trime" or
-        lower_dist == "hamster" or
-        lower_dist == "hamster3" then
-        return true
-    end
-
-    -- 2. 超越输入法检测（RimeAPI + /space/ 路径）
-    if dist_name_lower == "rimeapi" and
-        (lower_path:find("/space/") or sys_lower_path:find("/space/")) then
-        return true
-    end
-
-    -- 3. 通用移动路径关键词（Android/iOS/macOS）
-    local mobile_keywords = {"/android/", "/mobile/", "/sdcard/", "/storage/emulated/",
-                             "applications", "library"}
-    for _, kw in ipairs(mobile_keywords) do
-        if lower_path:find(kw) or sys_lower_path:find(kw) then
-            return true
-        end
-    end
-
-    -- 4. 鸿蒙系统路径特征（HarmonyOS / HarmonyOS NEXT）
-    -- 4.1 传统鸿蒙路径标识
-    if lower_path:find("/harmony/") or
-        lower_path:find("/hap/") or
-        lower_path:find("/harmonyos/") or
-        lower_path:find("/openharmony/") or
-        sys_lower_path:find("/harmony/") or
-        sys_lower_path:find("/hap/") then
-        return true
-    end
-
-    -- 4.2 鸿蒙沙箱存储路径（el数字 是鸿蒙特有，/data/storage/ 是 Android/鸿蒙共有）
-    if lower_path:find("/data/storage/el%d+") or
-        sys_lower_path:find("/data/storage/el%d+") then
-        return true
-    end
-
-    -- 4.3 鸿蒙 bundle 路径（应用资源目录）
-    if lower_path:find("/bundle/") or sys_lower_path:find("/bundle/") then
-        return true
-    end
-
-    -- 4.4 鸿蒙用户目录特征（/storage/Users/）
-    if lower_path:find("/storage/users/") or
-        sys_lower_path:find("/storage/users/") or
-        home:find("/storage/users/") then
-        return true
-    end
-
-    -- 4.5 超越输入法 + 鸿蒙组合检测
-    if dist_name_lower == "rimeapi" and
-        (lower_path:find("/data/storage/el%d+") or
-         lower_path:find("/space/") or
-         home:find("/storage/users/")) then
-        return true
-    end
-
-    -- 5. JIT 平台检测（Android/HarmonyOS）
-    if jit and jit.os then
-        local os_name = jit.os:lower()
-        if os_name:find("android") or os_name:find("harmony") then
-            return true
-        end
-    end
-
-    -- 6. 环境变量检测
-    if os.getenv("HMOS") or os.getenv("HARMONYOS") then
-        return true
-    end
-
-    -- 7. iOS 路径检测
-    if home:find("/var/mobile/") then
-        return true
-    end
-
-    -- 8. HOME 目录回退检测（Android 兜底）
-    if home:find("/storage/emulated/") then return true end
-    if home:find("/data/data/") then return true end
-
-    return false
-end
-
-local MOBILE_MODE = is_mobile_device()
+local MOBILE_MODE = core.is_mobile()
 
 ---@type string | nil 当前选中的键，命令模式为 0 开始的位置索引，正常模式为候选词
 local cur_adjustment_phrase = nil
