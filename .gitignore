@@ -60,10 +60,18 @@ sequence_*.txt
 /space/schemas/bim-pinyin/
 /space/schemas/bim-wubi/
 /space/schemas/sbsrf/
+/space/schemas/moran/
 /space/schemas/方案1/
 
 # ── tools 下的生成产物（脚本保留，产物不入库）──
 /tools/assoc_fixed_supplement.txt
+
+# ── 一次性诊断沙盒脚本（不纳入版本控制，仅回归测试脚本入库）──
+/tools/sandbox_quote_*.py
+/tools/sandbox_segmentor_*.py
+/tools/sandbox_table_sentence_test.py
+/tools/sandbox_unified_script_test.py
+/tools/sandbox_input_trace.py
 
 # ── 系统杂项 ──
 .DS_Store

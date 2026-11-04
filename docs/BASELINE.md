@@ -1,8 +1,8 @@
 # TouchWB / 流萤 · 项目基线（BASELINE）
 
-> **基线版本**：v2.3（README 口径 2026-10-24）
-> **基线日期**：2026-10-21（2026-10-24 修订过时口径）
-> **基线范围**：`D:\AutophotiaIME` 全库，975 个文件（不含 `.workbuddy` 与 `.git`，2026-10-24 实测）
+> **基线版本**：v2.19（README 口径 2026-11-04）
+> **基线日期**：2026-11-04（重定义基线，作为「模块化重构 + 类型定义库 + 纯内存状态表」新项目的起点）
+> **基线范围**：`D:\AutophotiaIME\dev\space\schemas\TouchWB` 方案本体，82 个文件（不含 build 编译产物，2026-11-04 实测）
 > **用途**：后续所有功能拓展、优化、Bug 修复均以此文件为对照基准；每次变更在此追加「变更记录」，保证任何时候都能回答"当前版本和基线差了什么"。
 
 ---
@@ -14,8 +14,8 @@
 | 项目 | TouchWB 五笔输入法方案（Rime 内核） |
 | 上游 | 空山明月底包 → Shawx（TouchWubi）→ **Autophotia（流萤）**当前维护 |
 | 仓库 | https://github.com/Autophotia/TouchWubi |
-| README 版本 / 日期 | v2.3 / 2026-10-24 |
-| info.yaml version | **"2.0" ⛔ 禁止修改**（输入法识别用；2026-10-25 事故：曾改 2.3 致导入后输入法不认，已回退）/ update_time 2026-10-24 |
+| README 版本 / 日期 | v2.19 / 2026-11-04 |
+| info.yaml version | **"2.0" ⛔ 禁止修改**（输入法识别用；2026-10-25 事故：曾改 2.3 致导入后输入法不认，已回退）/ update_time 2026-10-31 |
 | 默认方案 | `ly_wubi_14`（拇指五笔 14 键，项目默认口径；space.custom.yaml 当前实测为 `ly_wubi`，见 B-12） |
 | 默认主题 | `14key_wubi`（移动端）/ PC 用系统主题 |
 | 默认触感 | `bouncy`（旧基线为 `system`） |
@@ -26,9 +26,9 @@
 
 | 资产 | 基线值 | 对比旧基线（2026-10-20 首次分析） |
 |---|---|---|
-| Lua 代码 | **12,899 行**（15 个模块） | 9,678 行，+33% |
-| `lua/lib/` | 2,053 行（5 个库） | 1,317 行 |
-| schema 配置 | **1,935 行**（7 个） | 1,597 行 |
+| Lua 代码 | **15,455 行**（16 业务模块 + 5 库 = 21 文件） | 12,899 行，+20% |
+| `lua/lib/` | 2,051 行（5 个库） | 2,053 行，基本不变 |
+| schema 配置 | **2,018 行**（7 个） | 1,935 行 |
 | 主题（TouchWB） | 2 套 + public | 不变 |
 | space 通用主题 | **29 套** | 32 套（-14key_wubi、-t26_microsoft、+quick） |
 | space 补丁 | 30 个（含 `_speech_*`） | +support_t14/support_t18 新建 |
@@ -236,6 +236,10 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | 2026-10-31 | **修反引号段纯反引号吐候选破坏结束键 + 第五码点选残留（v2.16）**：真机复测 v2.15 两点是 `wubi_pinyin_filter.lua` 反引号分支的回归——① **纯反引号（长按Z）冒出「的、一、是、我」破坏结束键**：`pure_code_len==0` 时旧代码 `yield` 全部候选，而 `mkst`（`enable_completion:true`）对空编码吐高频单字 ⇒ 「长按Z再按空格=结束造词」时候选栏非空、按空格上屏第一候选而非触发结束；修复：`pure_code_len==0` 时直接清空候选（无编码字母本无匹配语义），恢复结束信号态。② **反引号段第五码点选残留成「接单d」**：`` `ruujd `` 的候选（接单）五笔匹配只吃掉前 4 码 `` `ruuj ``（span 0..5），第 5 码 `d` 不在候选 span 内 ⇒ 点选后引擎提交「接单」却把 `d` 残留回编码栏；修复：反引号段 `pure_code_len==5` 时把候选 span 拉满到整串输入（含反引号 0..6，`clone_candidate(cand, 0, #input_str, ...)`），第 5 码一并消费、点选正常上屏。③ **临时词召回诊断**：`user_coined_translator` 精确命中临时词时打 `[COIN:recall]` 日志，配合排查「不能用五笔编码转正」。新增 `tools/sandbox_filter_v216_test.py`（3 用例：纯反引号无候选 / 第五码 span 拉满 / 4 码不回归）。README v2.15→v2.16、更新日期 2026-10-31；info.yaml `update_time` 维持 2026-10-31（`version` 禁改不动） | Bug 修复（反引号段结束键 + 第五码 span） | 7 套沙盒测试全通过（含新增 filter_v216）；`wubi_pinyin_filter.lua`/`Submit_text.lua` 语法配平通过；**待真机验证长按Z再按空格结束 + `ruujd 点选不残留 + 撞码召回转正** |
 | 2026-10-31 | **修 new_spelling 覆盖 user_coined comment 致自造词召回失败（v2.17）**：filter 链最前端 `new_spelling.lua` 隐根/显根模式用 `get_tricomment` 覆盖 `user_coined` 候选 comment（「编码☯」→「〈pin·yin·ke〉·〈rusk〉」），下游 `wubi_pinyin_filter` 提取编码误取拼音 ⇒ 自造词「写入成功却打不出来」。修复：对 `cand.type=="user_coined"` 早退原样 yield（显根/隐根两处），不覆盖 comment、不占注解名额。新增 `tools/sandbox_newspelling_coin_test.py`（3 用例）+ 反向验证（git show HEAD 恢复旧版失败）。README v2.16→v2.17、更新日期 2026-10-31；info.yaml `update_time` 维持 2026-10-31（`version` 禁改不动） | Bug 修复 | 沙盒 3 用例全通过 + 反向验证通过；6 套回归全通过；**待真机验证手动词/临时词按编码召回** |
 | 2026-10-31 | **手动造词拼音/五码筛选不参与造词（v2.18，部署根因非代码 bug）**：反引号段拼音筛字 `table_translator@mkst_pinyin`（挂 ly_pinyin、`prefix:"`"`、`tag:mkst`）是 10-31 加到源 schema 的，但真机加载 build 产物 + S124 包（10-29）不含它，`mkst enable_completion:true`（v2.9）也未部署 ⇒ 逐字翻页选字/第五码筛选缺料、手动造词退回纯五笔。修复：重打包 `TouchWB_S125_2026-10-31.zip`（验证含 mkst_pinyin 段 + enable_completion:true），部署 S125（schema 必须同步）+ 清 build 缓存/切换方案。真机验收：五笔/拼音/五码筛选上屏均能造词并召回。README v2.17→v2.18、更新日期 2026-10-31；info.yaml `update_time` 维持 2026-10-31（`version` 禁改不动） | 部署修复（非代码 bug） | 真机验证通过，造词功能全链路闭环；S125 为当前基线包 |
+| 2026-11-01 | **baseline S136 + 拼音造词口径更新 + 第五码筛选 table 化**：① 撞码抑制 + 布隆过滤器卡顿优化 + userdb 迁移 + 文件布局统一（联想 assoc/ 调序 tips 数据统一到 `lua/` 下）+ 26 键三能力（提交 `396289c`）；② **拼音造词口径更新（推翻旧「只做单字」口径）**：反引号段拼音筛字 `mkst_pinyin` 从 `table_translator` 改 `reverse_lookup_translator`（走 Syllabifier 音节图切分），支持**词组**（`` `pinyin ``→拼音、`` `xihuan ``→喜欢）+ 单字（`` `shou ``/`` `liang ``/`` `nihao ``），与混输正常拼音同机制，14 键 `prism` 仍 `ly_pinyin_14`；③ 第五码筛选 `wubi_prefix` 改 `table_translator`（次日回退，见下条） | 新能力 + 架构调整 | S126~S136 打包；沙盒回归通过 |
+| 2026-11-02 | **第五码筛选回退 script_translator + 打码判据铁律（用户拍板）**：① `wubi_prefix` 回退 `script_translator`——11-01 改 table 后实测 26+14 键第五码 `z` 失效（table 的 MakeSentence 把含 z 整串当五笔编码、z 非字根返回空）+ 14 键 `fffff` 失效（短码命中 preedit<4 被 filter 的固定值 4 误杀），script 音节图对任意字母都能切、z 正常（tanez→主/长/筑）；② 14 键 `fffff` 单独修复：`wubi_pinyin_filter.lua` 第 5 码分支 `prefix_n=min(4, cand._end)`；③ **确立「打码判据铁律」**：判断「正在打码」唯一可靠判据是 `context.input ~= ""`（predictor 空段**不消耗 input**），key_binder 的 `when: composing/has_menu` 会被空段污染，标点选候选快捷键移到 Lua 层（`Submit_text`/`pair_punct`）；④ `drop_sentence.lua` 丢弃 `type=sentence` 乱词 | 回退 + 修复 | 沙盒 `sandbox_z_fffff_verify` 坐实 z/fffff 行为；回归通过 |
+| 2026-11-03 | **标点 / 引号键 / = 键 / @ 键四项修复（S137~S139）**：① **标点乱出字两根因**——`Submit_text` 的 `last_2th/3th` 缓存上屏后残留（非打码态立即清空）+ PC 端 predictor 空段污染判据（`not is_mobile()` 时 `set_option("prediction", false)`，移动端不动）；② **引号键「仅英文单引号候选菜单」**——init 空段让 `smart_assoc` 误判联想段、把引号键放行给 punctuator，而 punctuator 对 keycode 0x27 无法处理 ⇒ `pair_punct` 豁免判据排除引号键、走 QUOTEFIX 分支交替上屏中文引号；③ **number 键盘 = 键空格上屏空白/单引号**——`ascii_mode:1` 使 `=` 走 ascii 段、空格被 ascii_composer 收走 ⇒ `calc_symbol_processor` 在 `=` 进编码栏时临时关 `ascii_mode`、编码清空自动还原；④ **上滑 @ 邮箱后缀**——主题 `swipe_up` 字面量改 `send_halfat`（send 进编码栏）+ `@` 进编码栏临时关 `ascii_mode` 触发邮箱翻译器 | Bug 修复 | 沙盒 at_full/equal/punct/quote 系列验证通过；真机验证 =/@ 修复有效 |
+| 2026-11-04 | **自动调频 PC 端验证 + 基线重定义 v2.19（S139）**：① **自动调频 PC 端触发方式澄清**——与移动端完全一致（同一「编码+词」连续上屏两次），数字键 / 空格 / 分号(send2) / 引号(send3) 四种上屏方式都能触发；② **澄清「全新部署后需切换方案才生效」**——Rime 部署预加载默认方案、把 Lua 插件（调频库）初始化成「部署态半成品」并按方案缓存复用，切换方案/重启小狼毫强制重建即正常（非 bug，Rime 部署-加载时序怪癖）；③ `drop_sentence.lua` 纳入版本控制（`775b1dd`）；④ **本次重定义基线 v2.19**（README/BASELINE 口径同步），作为「模块化重构 + 类型定义库 + 纯内存状态表」新项目起点 | 验证 + 基线固化 | `sandbox_af_verify` 四路径全过；README/BASELINE 头部口径已同步 |
 
 ---
 

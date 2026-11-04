@@ -1,10 +1,10 @@
 ﻿# TouchWB 五笔输入法方案功能说明
 
-> 版本：v2.18
+> 版本：v2.19
 > 原作者：空山明白、Shawx
 > 维护者：Autophotia（流萤）
 > 项目主页：https://github.com/Autophotia/TouchWubi
-> 更新日期：2026-10-31
+> 更新日期：2026-11-04
 
 ---
 
@@ -12,6 +12,39 @@
 
 > 只记录「新增 / 优化了什么」和「怎么用」。实现细节、排错过程见代码注释与
 > `本次修改-回归测试清单.md`。
+
+### 2026-11-04
+
+**自动调频 PC 端验证 + 基线固化（v2.19，S139）**
+
+- **自动调频 PC 端触发方式澄清**：与移动端完全一致——同一「编码+词」连续上屏两次即提前（`AUTO_FREQ_MIN=2`）；数字键 / 空格 / 分号（上屏二候选）/ 引号（上屏三候选）四种上屏方式都能触发，无区别。
+- **「全新部署后需切换方案才生效」澄清（非 bug）**：Rime 部署会预加载默认方案做编译，此过程把 Lua 插件（调频库）初始化成「部署态半成品」并按方案缓存复用，之后第一次真正用默认方案时复用了这份半成品 ⇒ 调频不生效。切换方案（或重启小狼毫）会强制重建 Lua 环境、回到完整运行态即正常。属 Rime 部署-加载时序怪癖，非配置错误。
+- 纳入 `drop_sentence.lua`（丢弃整句候选）到版本控制；项目指令 v14 补代理路径。
+
+### 2026-11-03
+
+**标点 / 引号键 / = 键 / @ 键 四项修复（v2.18~v2.19，S137~S139）**
+
+- **标点乱出字修复（两个根因）**：① 打「测试」上屏后按分号/引号出「测度/小幅度」= `Submit_text.lua` 的 `last_2th_text`/`last_3th_text` 缓存只在上屏字母态刷新、上屏后残留 ⇒ 非打码态立即清空缓存；② PC 端 predictor 空段+预测候选污染判据 ⇒ `Submit_text.lua` 里 `not is_mobile()` 时 `set_option("prediction", false)`（移动端不动，移动端联想正挂在 predictor 空段上）。
+- **引号键「仅英文单引号候选菜单」修复**：init 空段让 `smart_assoc` 误判「联想段」、把引号键放行给 punctuator，而 punctuator 对 keycode 0x27 无法处理 ⇒ 英文引号卡进编码栏。修复：`pair_punct.lua` 的联想段豁免判据排除引号键，引号键走 QUOTEFIX 分支按 key_char 交替上屏中文引号。
+- **number 键盘 = 键后空格上屏空白/单引号修复**：`ascii_mode:1` 使 `=` 被 ascii_segmentor 切成 ascii 段、空格被 ascii_composer 收走。修复：`calc_symbol_processor.lua` 在 `=` 进编码栏时临时关 `ascii_mode`，编码清空后自动还原。
+- **上滑 @ 出邮箱后缀修复（两层）**：① 主题数字键盘 `swipe_up` 字面量 `"@"`（前端直插、绕开 Rime）改 `send_halfat`（`send:"@"` 进编码栏）；② `@` 进编码栏后临时关 `ascii_mode` 触发邮箱后缀翻译器。
+
+### 2026-11-02
+
+**第五码筛选回退 script_translator + 打码判据铁律**
+
+- **第五码筛选 `wubi_prefix` 回退 `script_translator`**（11-01 曾改 `table_translator`，实测 26+14 键第五码 `z` 失效 + 14 键 `fffff` 失效，用户拍板回退）：script 音节图对任意字母（含 z 声母）都能切，z 正常（tanez→主/长/筑）；table 的 MakeSentence 把含 z 的整串当五笔编码建图、z 非字根返回空。
+- **14 键 `fffff` 修复**：`wubi_pinyin_filter.lua` 第 5 码分支 `prefix_n=min(4, cand._end)`（短码命中时 preedit 长度 <4 被旧固定值 4 误杀）。
+- **确立「打码判据铁律」**：判断「正在打码」唯一可靠判据是 `context.input ~= ""`（predictor 空段**不消耗 input**）。key_binder 的 `when: composing/has_menu` 都会被空段污染，故标点选候选快捷键移到 Lua 层（`Submit_text.lua`/`pair_punct.lua`）用 `input ~= ""` 判据。
+- `drop_sentence.lua` 丢弃 `type=sentence` 候选，根除整句乱词。
+
+### 2026-11-01
+
+**拼音造词口径更新 + baseline S136**
+
+- **拼音造词口径更新（推翻旧「只做单字」口径）**：反引号段拼音筛字 `mkst_pinyin` 从 `table_translator` 改为 `reverse_lookup_translator`（走 Syllabifier 音节图切分），支持**词组**（`` `pinyin ``→拼音、`` `xihuan ``→喜欢）+ 单字（`` `shou ``/`` `liang ``/`` `nihao ``），与混输正常拼音同机制；14 键 `prism` 仍 `ly_pinyin_14`。
+- **baseline S136**：撞码抑制 + 布隆过滤器卡顿优化 + userdb 迁移 + 文件布局统一（联想/调序数据统一到 `lua/` 下）+ 26 键三能力。
 
 ### 2026-10-31
 
@@ -629,7 +662,7 @@ algebra/+:
 - `/txzj` - 调序自动**检**：自动调频自检（连续几次 / 该码已调频了几个词 / 末次结算的词 / 队尾）
 
 > 命令命名规则：`tx` = 调序，后两位是功能的拼音首字母
-> （`ql`=清理、`dc`=导出、`dr`=导入、`tj`=统计、`zq`=自动清、`zj`=自动检）
+> （`qk`=清空、`dc`=导出、`dr`=导入、`tj`=统计、`zq`=自动清、`zj`=自动检）
 
 **自动调频**（第二十轮新增，与手工调频并存）：
 
