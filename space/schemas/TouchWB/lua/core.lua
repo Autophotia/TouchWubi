@@ -33,10 +33,13 @@ core.state = {
     -- 状态：自 S88 起写点随长按语音代码被删、仅剩读点，已空转。保留字段位以对照历史。
     assoc_predicting = false,
 
-    -- 统一调试总开关（原各模块零散的 DEBUG_LOG / DEBUG_KEY_LOG / DEBUG_COIN_LOG）
-    -- 默认 false（正式版静默）；测试时用命令 /dbg 切换，或临时改 DEFAULT_DEBUG 后重部署。
-    -- 写点：core.toggle_debug()（/dbg 命令）；读点：core.dbg() 门控。
+    -- 统一调试开关（原各模块零散的 DEBUG_LOG / DEBUG_KEY_LOG / DEBUG_COIN_LOG）
+    -- 默认全关（正式版静默）。排查哪个模块，就把它的 tag 加进 debug_tags（前缀匹配），
+    -- 改完重新打包即可，详见 core.dbg 注释。读点：core.dbg() 门控。
+    --   debug      = true                 → 一次性全开所有模块（慎用，会刷屏）
+    --   debug_tags = { assoc = true } 等  → 针对性只开某模块
     debug = false,
+    debug_tags = {},
 }
 
 -- ============================================================================
@@ -150,13 +153,26 @@ end
 -- == 统一调试日志 core.dbg（2026-11-04）==
 -- ============================================================================
 -- 取代各模块零散的 DEBUG_LOG / DEBUG_KEY_LOG / DEBUG_COIN_LOG 布尔开关，
--- 让一个 /dbg 命令就能点亮所有模块的调试输出（测试成品时快速定位问题）。
+-- 提供一致的日志格式 + 连续行去重 + 双通道输出。
 -- 双通道输出：
 --   ① rime 日志 log.info —— 真机（鸿蒙超越）只有**第一个参数**会进日志，
 --      故把整条日志拼进第一个参数，前缀 [TW]。
 --   ② 用户目录 touchwb_debug.log —— PC/移动端用户数据目录均可写，按时间戳追加。
 -- 用法：core.dbg("assoc", "foo=%s bar=%d", s, n)  （首参带 % 走 string.format）
 --       core.dbg("assoc", "a", "b", 123)           （多参数拼接）
+--
+-- ★ 开关机制（针对性排查，默认全关，正式版静默）：
+--   排查哪个模块，就把它的 tag 加进 core.state.debug_tags（前缀匹配），重新打包即可。
+--   各模块实际使用的日志 tag：
+--     assoc       —— 智能联想（smart_assoc.lua）
+--     auto_coined —— 自动造词（auto_coined.lua）
+--     COIN:       —— 手动造词写入（Submit_text.lua，前缀匹配 COIN:ntf/write/code/...）
+--     Submit_text —— 按键 / 快捷上屏（Submit_text.lua）
+--   例：
+--     core.state.debug_tags = { assoc = true }        → 只开智能联想
+--     core.state.debug_tags = { ["COIN:"] = true }    → 只开手动造词
+--   一次性全开所有模块（慎用，刷屏）：core.state.debug = true
+--   排查完把 debug_tags 清空、debug 改回 false，重新打包。
 local DEBUG_FILE = "touchwb_debug.log"
 
 -- ★ 连续去重：上一次写入的完整行（含时间戳）。update_notifier 等高频回调在
@@ -173,8 +189,20 @@ local function dbg_str(v)
     return tostring(v)
 end
 
+-- tag 是否命中调试白名单（精确匹配 + 前缀匹配，支持 "COIN:" 一类前缀）
+local function dbg_tag_on(tag)
+    tag = tostring(tag)
+    local tags = core.state.debug_tags
+    if not tags then return false end
+    if tags[tag] then return true end
+    for p, on in pairs(tags) do
+        if on and p ~= "" and tag:sub(1, #p) == p then return true end
+    end
+    return false
+end
+
 function core.dbg(tag, ...)
-    if not core.state.debug then return end
+    if not (core.state.debug or dbg_tag_on(tag)) then return end
     local n = select("#", ...)
     if n == 0 then return end
     local first = select(1, ...)
@@ -202,13 +230,6 @@ function core.dbg(tag, ...)
             if f then f:write(line .. "\n"); f:close() end
         end
     end)
-end
-
-function core.dbg_enabled() return core.state.debug == true end
-
-function core.toggle_debug()
-    core.state.debug = not core.state.debug
-    return core.state.debug
 end
 
 -- ============================================================================

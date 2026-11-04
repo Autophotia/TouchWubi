@@ -83,7 +83,7 @@ local core = require "core"
 --   Lua 侧唯一该做的，就是别碰空格。原先「扣住空格给长按」的思路本身就是错的。
 
 -- =================================================================
--- == 造词专用日志（统一走 core.dbg，由 /dbg 开关门控，见 core.lua）==
+-- == 造词专用日志（统一走 core.dbg，由 core.state.debug_tags 门控，见 core.lua）==
 -- =================================================================
 local function kcoin(tag, msg)
     core.dbg("COIN:" .. (tag or "?"), msg or "")
@@ -93,7 +93,7 @@ end
 --   用途：把「分号上屏第二候选 / 单引号上屏第三候选」这两个 PC 习惯快捷键
 --   在手机上关掉（手机上点候选栏更快，这两个键会被截胡，纯添乱）。
 
--- ★ 逐键调试日志（统一走 core.dbg，由 /dbg 开关门控）。
+-- ★ 逐键调试日志（统一走 core.dbg，由 core.state.debug_tags 门控）。
 local function klog(tag, msg)
     core.dbg(tag, msg)
 end

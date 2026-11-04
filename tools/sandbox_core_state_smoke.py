@@ -13,13 +13,16 @@ from ctypes import (
     c_int, c_void_p, c_char_p, c_size_t,
     POINTER, Structure, byref,
 )
-import os, shutil, tempfile, glob
+import os, shutil, tempfile, glob, sys
 
 WEASEL_DIR = r"D:\Program Files\Rime\weasel-0.17.4"
 SHARED_DATA = os.path.join(WEASEL_DIR, "data")
 TOUCHWB_REAL = r"D:\Program Files\Rime\TouchWB"          # 已部署目录（含 build/*.bin + predict.db）
 TOUCHWB_DEV = r"D:\AutophotiaIME\dev\space\schemas\TouchWB"  # 源目录（含改动后的 lua）
 RIME_DLL = os.path.join(WEASEL_DIR, "rime.dll")
+
+# 命令行 --targeted：把 core.state.debug_tags 注入为 { assoc=true }，验证「针对性开关只开某模块」
+TARGETED = "--targeted" in sys.argv
 
 
 class RimeTraits(Structure):
@@ -173,6 +176,19 @@ def main():
         shutil.copyfile(src, dst)
         print(f"    OK  {rel}")
 
+    if TARGETED:
+        # 针对性调试验证：只开 assoc tag，确认 core.dbg 只输出 [assoc]、不泄漏其它模块
+        core_path = os.path.join(user_dir, "lua", "core.lua")
+        with open(core_path, "r", encoding="utf-8") as f:
+            s = f.read()
+        s2 = s.replace("    debug_tags = {},", "    debug_tags = { assoc = true },")
+        if s2 == s:
+            print("  ✗ 未找到 '    debug_tags = {},' 占位，无法注入针对性开关")
+        else:
+            with open(core_path, "w", encoding="utf-8") as f:
+                f.write(s2)
+            print("[*] 已注入 debug_tags = { assoc = true }（针对性调试验证）")
+
     # 确认核心文件就位
     for rel in ["lua/core.lua", "lua/types.lua", "lua/smart_assoc.lua", "lua/pair_punct.lua",
                 "build/ly_wubi_pinyin.prism.bin", "predict.db"]:
@@ -249,34 +265,40 @@ def main():
     dump(get_context(lib, sid), "/tj")
     press(lib, sid, " ")
 
-    # 调试开关：/dbg 切换 core.state.debug（验证 core.dbg 统一日志 + 文件输出）
-    print("\n=== 调试命令 /dbg（切换 core.state.debug）===")
+    # 2026-11-04：/dbg 命令已移除（改为 core.state.debug_tags 按 tag 精准开关）。
+    # 这里确认输 /dbg 不再报错、也不再弹 🐞 消息（命令已摘除，静默放行/按普通输入处理）。
+    print("\n=== /dbg 已移除：输入 /dbg 不应触发调试开关 ===")
     press(lib, sid, "/dbg")
-    dump(get_context(lib, sid), "/dbg on")
-    press(lib, sid, " ")
-    # 开 debug 后打一串码 + 标点，触发各模块 core.dbg 写日志
-    press(lib, sid, "fcu")
-    press(lib, sid, " ")
-    press(lib, sid, ";")
-    # 再关掉
-    press(lib, sid, "/dbg")
-    dump(get_context(lib, sid), "/dbg off")
-    press(lib, sid, " ")
+    dump(get_context(lib, sid), "/dbg (应无 🐞 消息)")
+    press(lib, sid, "{Escape}")
 
     lib.RimeDestroySession(sid)
     lib.RimeFinalize()
 
-    # 检查统一调试日志文件是否生成（core.dbg 通道②：用户目录 touchwb_debug.log）
+    # 检查统一调试日志文件（core.dbg 通道②：用户目录 touchwb_debug.log）
     print("\n=== touchwb_debug.log 检查 ===")
     dbg_log = os.path.join(user_dir, "touchwb_debug.log")
-    if os.path.exists(dbg_log):
-        with open(dbg_log, "r", encoding="utf-8", errors="replace") as f:
-            lines = f.read().strip().splitlines()
-        print(f"  已生成 {dbg_log}，共 {len(lines)} 行：")
-        for ln in lines[:8]:
-            print(f"     {ln[:140]}")
+    if TARGETED:
+        # 针对性模式：应生成日志，且只含 [assoc]、无 [auto_coined]/[Submit_text]/[COIN:
+        if not os.path.exists(dbg_log):
+            print("  ⚠ 针对性开启 assoc 后仍未生成日志（门控失效）")
+        else:
+            with open(dbg_log, "r", encoding="utf-8", errors="replace") as f:
+                lines = [ln for ln in f.read().splitlines() if ln.strip()]
+            bad = [ln for ln in lines
+                   if "[auto_coined]" in ln or "[Submit_text]" in ln or "[COIN:" in ln]
+            print(f"  已生成 {len(lines)} 行；非 assoc 行数 = {len(bad)}（应 0）")
+            if bad:
+                for ln in bad[:5]:
+                    print(f"     ⚠ {ln[:140]}")
+            else:
+                print("  ✅ 针对性开关生效：只输出 [assoc]，未泄漏其它模块")
     else:
-        print(f"  ⚠ 未生成 {dbg_log}（core.dbg 文件通道可能未触发，需人工确认）")
+        # 默认模式：debug 全关，正常打字不应产生调试日志
+        if os.path.exists(dbg_log):
+            print("  ⚠ 默认全关却生成了调试日志（core.dbg 门控失效）")
+        else:
+            print("  ✅ 默认全关，未生成调试日志（core.dbg 门控正常）")
 
     # 检查日志里的 Lua 错误
     print("\n=== 日志检查 ===")

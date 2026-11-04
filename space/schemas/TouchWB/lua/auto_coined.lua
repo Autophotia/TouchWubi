@@ -55,8 +55,8 @@
 --
 -- ★ 本模块只新增一个处理器（lua_processor@*auto_coined*P），不改动任何现有逻辑；
 --   开关 auto_coined 关（默认）时 P.func 直接放行，零开销。
--- ★ 调试日志：走 core.dbg，由 /dbg 命令统一开关（见 core.lua），逐条打印
---   「检测到提交 / 造了哪些词 / 是否撞码」。
+-- ★ 调试日志：走 core.dbg，由 core.state.debug_tags 按 tag 精准开关（见 core.lua），
+--   逐条打印「检测到提交 / 造了哪些词 / 是否撞码」。
 -- ============================================================================
 
 -- ★ 2026-11-04 模块化重构：造词数据服务从 Submit_text.lua 的 _G 导出改为显式 require。
@@ -115,7 +115,7 @@ local function is_escape(repr, kc)
     return n == 0xFF1B or n == 27
 end
 
--- ---- 诊断日志（统一走 core.dbg，由 /dbg 开关门控） ----
+-- ---- 诊断日志（统一走 core.dbg，由 core.state.debug_tags 门控） ----
 local function klog(tag, msg)
     core.dbg(tag, msg)
 end

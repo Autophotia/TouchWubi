@@ -367,7 +367,7 @@ local _last_ctx = nil
 local _fixed = nil
 local _fixed_tried = false
 
--- 调试日志：统一走 core.dbg（tag="assoc"），由 /dbg 命令开关门控（见 core.lua）。
+-- 调试日志：统一走 core.dbg（tag="assoc"），由 core.state.debug_tags 门控（见 core.lua）。
 --   原两条输出通道（log.info 首参 + PC 文件）已并入 core.dbg 双通道，语义不变；
 --   probe（下方）仍是独立的「临时取证」深诊断通道，两套机制互补、互不干扰。
 local function dbg(fmt, ...)
@@ -2497,7 +2497,7 @@ function T.fini(env) end
 function T.func(input, seg, env)
     if input == nil then return end
     -- S60 取证：predictor 空段上本函数到底收到什么 input / 数据与时机如何。
-    --   ★ 必须走 probe 而不是 dbg —— dbg 受 core.state.debug 门控，默认关、真机静默。
+    --   ★ 必须走 probe 而不是 dbg —— dbg 受 debug/debug_tags 门控，默认关、真机静默。
     if PROBE_ON then
         probe(string.format("T.func in=%q pend=%s ready=%s seg=[%d,%d]",
             tostring(input), tostring(pending_cands ~= nil),
