@@ -160,6 +160,16 @@ function processor.func(key, env)
             end
             return 1
         end
+        -- ★ 2026-11-04 修复：input 只有单独一个 "=" 时，再按 = 键应「循环符号候选」
+        --   （＝ 々 〃，与 / 键的 、､/／÷ 同类），而不是继续 push "=" 累积成 "=="。
+        --   根因：原逻辑 is_calc_mode 判「input 以 = 开头」，单独的 "=" 也命中 ⇒
+        --   重复按 = 键一直在编码栏累积 =。这里单独拦下「input == "="」放行给
+        --   pair_punct / punctuator 做候选循环（pair_punct 的 pool_punct_set["="]
+        --   会 return 2 继续放行，最终 punctuator 循环 ＝々〃）。
+        --   计算器不受影响：= 后跟数字/运算符时 input 变 "=1" 等，仍走下方 calc 分支。
+        if context.input == "=" then
+            return 2
+        end
         if is_calc_mode(context) then
             context:push_input("=")
             return 1

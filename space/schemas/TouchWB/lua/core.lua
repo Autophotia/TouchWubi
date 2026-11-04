@@ -159,6 +159,11 @@ end
 --       core.dbg("assoc", "a", "b", 123)           （多参数拼接）
 local DEBUG_FILE = "touchwb_debug.log"
 
+-- ★ 连续去重：上一次写入的完整行（含时间戳）。update_notifier 等高频回调在
+--   真机上会一次触发成百上千次，每次都打同一行日志 ⇒ 卡顿 + 日志膨胀。
+--   相同行连续重复时跳过（只防「连续」重复，不同行、隔行重复都照常写）。
+local _last_line = nil
+
 local function dbg_str(v)
     if type(v) == "table" then
         local t = {}
@@ -183,6 +188,10 @@ function core.dbg(tag, ...)
         msg = table.concat(parts, " ")
     end
     local line = os.date("%H:%M:%S") .. " [" .. tostring(tag) .. "] " .. msg
+    -- ★ 连续去重（见 _last_line 定义）：update 回调刷屏时，同一行只写第一次，
+    --   避免真机上一秒刷上千行日志 + 上千次文件 open/write/close 导致的卡顿。
+    if line == _last_line then return end
+    _last_line = line
     -- 通道①：rime 日志（真机只有第一个参数会进日志，故拼进第一个参数）
     pcall(function() if log and log.info then log.info("[TW] " .. line) end end)
     -- 通道②：用户目录文件

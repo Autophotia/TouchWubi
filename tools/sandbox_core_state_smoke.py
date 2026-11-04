@@ -142,6 +142,12 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
     print(f"[*] 复制真机已部署目录 -> {user_dir}")
     shutil.copytree(TOUCHWB_REAL, user_dir, ignore=shutil.ignore_patterns("*.userdb"))
+    # 删掉真机残留的调试日志（用户上次 /dbg 测试留下），让本次从干净状态统计去重效果
+    for leftover in ["touchwb_debug.log"]:
+        p = os.path.join(user_dir, leftover)
+        if os.path.exists(p):
+            os.remove(p)
+            print(f"    已删除残留 {leftover}")
 
     # 叠加本次改动/新增的 lua 文件（core/type 迁移 + 造词数据层拆分）
     overlay = {
@@ -155,6 +161,7 @@ def main():
         "lua/user_coined_cmd.lua": "lua/user_coined_cmd.lua",
         "lua/super_sequence.lua": "lua/super_sequence.lua",
         "lua/input_statistics.lua": "lua/input_statistics.lua",
+        "lua/calc_symbol_processor.lua": "lua/calc_symbol_processor.lua",
     }
     print("[*] 叠加 dev 改动文件：")
     for rel, src_rel in overlay.items():
@@ -194,6 +201,28 @@ def main():
     for seq in [";", "{quotedbl}", "{apostrophe}"]:
         c = press(lib, sid, seq)
         print(f"  [{seq}] commit={c!r}")
+
+    # ★ 2026-11-04：= 键符号菜单循环（空状态按 = 应弹「＝ 々 〃」，再按 = 循环而非累积 ==）
+    print("\n=== = 键符号菜单循环 ===")
+    press(lib, sid, "{Escape}")
+    press(lib, sid, "{equal}")
+    dump(get_context(lib, sid), "= 第1次(应弹符号菜单)")
+    press(lib, sid, "{equal}")
+    dump(get_context(lib, sid), "= 第2次(应循环,而非 '==' )")
+    press(lib, sid, "{equal}")
+    dump(get_context(lib, sid), "= 第3次(继续循环)")
+    press(lib, sid, "{Escape}")
+
+    # ★ 计算器仍可用：= 后跟数字启动算式
+    print("\n=== 计算器 = 1+1 ===")
+    press(lib, sid, "{equal}1+1")
+    dump(get_context(lib, sid), "= 1+1")
+    press(lib, sid, " ")
+    press(lib, sid, "{Escape}")
+
+    # 注：Ctrl+L 调序重置依赖 PC function mode（沙盒 distribution_code_name 非小狼毫、
+    #   function mode 未激活 ⇒ Ctrl 组合键被放行进 input，无法在此模拟）。该修复
+    #   （process_adjustment 遍历 get_adjustment 全量删除）靠代码 review + 真机验证。
 
     # 再打一组，确认多次按键后状态表读写无异常
     print("\n=== 打码 whnt（个性）===")

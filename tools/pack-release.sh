@@ -56,6 +56,7 @@ EXCLUDE_FILES = {
     '.gitignore', 'user.yaml', 'installation.yaml',
     'custom_phrase.txt', 'custom_phrase.db', 'custom_phrase.db-shm', 'custom_phrase.db-wal',
     'user_coined_ext.txt', 'user_coined_auto.txt',
+    'touchwb_debug.log',          # core.dbg 调试日志（/dbg 运行时生成，勿进包）
 }
 EXCLUDE_DIRS = {'.git', 'log', 'tmp'}
 EXCLUDE_GLOBS = ('*.bak', '*.tmp', '*.db-shm', '*.db-wal', '.DS_Store', 'Thumbs.db', 'desktop.ini')

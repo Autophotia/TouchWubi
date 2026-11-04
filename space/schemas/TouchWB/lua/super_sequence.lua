@@ -552,12 +552,28 @@ local function process_adjustment(context, schema_id)
     local selected_cand = context:get_selected_candidate()
 
     if cur_adjust_offset == nil then -- 如果是重置/置顶，直接设置位置
-        -- 非索引匹配的情况下，我们可以直接重置，提高效率
         local code = extract_adjustment_code(context)
-        local adjustment_key = is_function_mode_active(context)
-            and context.composition:back().selected_index
-            or selected_cand.text
-        save_adjustment(code, adjustment_key, in_pin_mode and 1 or nil, nil, schema_id)
+        if in_pin_mode then
+            -- Ctrl+P 置顶：只把当前候选设到第 1 位
+            local adjustment_key = is_function_mode_active(context)
+                and context.composition:back().selected_index
+                or selected_cand.text
+            save_adjustment(code, adjustment_key, 1, nil, schema_id)
+        else
+            -- ★ 2026-11-04 修复：Ctrl+L 重置 = 复位「当前编码的所有手动调序记录」，
+            --   恢复默认顺序。原实现只删「当前高亮候选」一条记录（save_adjustment(code,
+            --   当前候选, nil)），用户实测反馈「只能定位到调序的候选上单个复位」，
+            --   期望是「打这个编码后按 Ctrl+L 把调过序的候选全部复位」——毕竟记不清
+            --   每个候选原来在哪。这里改为遍历 get_adjustment 全量删除。
+            --   注：get_adjustment 已跳过 \002 开头的自动调频记录，故自动调频不受影响
+            --   （自动调频另有 /txzq 命令清空）。
+            local user_adjustment = get_adjustment(code, schema_id)
+            if user_adjustment then
+                for adjust_key in pairs(user_adjustment) do
+                    save_adjustment(code, adjust_key, nil, nil, schema_id)
+                end
+            end
+        end
     else -- 否则进入 filter 调整位移
         cur_adjustment_phrase = selected_cand.text
     end
