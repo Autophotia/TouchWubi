@@ -3,10 +3,11 @@
 # 用法：bash dev/tools/pack-release.sh
 # 输出：releases/TouchWB_S<序号>_<日期>.zip（序号取已有最大 S 编号 +1，如 S117 → S118）
 #
-# 打包规则（对照参考包逐条固化，共 63 个文件）：
+# 打包规则（对照参考包逐条固化；63 → 67 = 2026-11-04 模块化重构新增 4 个 lua）：
 #   结构：zip 内含 TouchWB/ 根目录
 #   包含：README/default/info/weasel/symbols、
-#         icons/、opencc/、lua/（21个，含 2026-10-29 新增 auto_coined.lua、2026-11-01 新增 drop_sentence.lua）、6+1 schema、4 套词库、
+#         icons/、opencc/、lua/（25个，含 2026-10-29 auto_coined、2026-11-01 drop_sentence、
+#               2026-11-04 core/types/user_coined_db/user_coined_translator）、6+1 schema、4 套词库、
 #         themes/14key_wubi、themes/26key_wubi、predict.db
 #   排除：user.yaml、installation.yaml（本机安装配置）
 #         custom_phrase.txt 及 .db*（自造词动态库）、user_coined_ext.txt / user_coined_auto.txt（运行时自动生成）、
@@ -108,8 +109,9 @@ with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as z:
     total += len(BUILD_DEFAULT.encode('utf-8'))
 
 print('打包完成：%d 个文件（含生成的 build/default.yaml），压缩前 %.1f MB' % (count, total / 1048576))
-if count != 63:
-    print('⚠️ 文件数与参考包基线（63）不一致，请核对排除规则或新增资产')
+# 基线 63 → 67：2026-11-04 模块化重构新增 core/types/user_coined_db/user_coined_translator 四个 lua
+if count != 67:
+    print('⚠️ 文件数与基线（67）不一致，请核对排除规则或新增资产')
 PYEOF
 
 size="$(du -h "$target" | cut -f1)"

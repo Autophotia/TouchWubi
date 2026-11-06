@@ -107,6 +107,39 @@ local function log_debug(msg)
     end
 end
 
+-- ★ 2026-11-06【多行信息候选不把尾部 \n 写进候选栏】
+--   /jq /gz /nl /jt 的内容是「多行段落」，历史上每段最后一行也带 \n，
+--   于是候选 text 末尾就有一个换行 —— 前端会把它在候选栏渲染成空白，挡住
+--   文字预览（与 /tj 报告「横线挡预览」是同一类问题）。
+--   现统一去掉末尾连续的 \n（**行间 \n 是内容排版，保留**），尾部空行改由
+--   core.finalize_commit_text 在「已选中、提交时」补上：
+--     · 空格 / 分号 / 引号 → Submit_text.submit_text_for
+--     · 点候选 / 数字键     → input_statistics 的 group=-1 前置回调
+--   ⇒ 上屏效果不变（多行内容末尾仍恰有一个空行，光标落到空行，
+--     接着打字不会粘在上屏内容尾部），候选栏却不再有尾部空白。
+--   单行值型命令（/rq /sj /xq /dt）不走这里，也不该加回车。
+local function strip_tail_newline(s)
+    if type(s) ~= "string" then return s end
+    return (s:gsub("\n+$", ""))
+end
+
+-- ★ 2026-11-06【多行信息候选：候选栏只显首行标题，上屏还原全文】
+--   /jt /jq /gz /nl 的正文是多行段落，历史上整段塞进候选 text ⇒ 前端压平后
+--   标题后面拖着一长串正文预览（用户实测 /jt 候选「嗨，下午好!〔…〕」后面
+--   还显示「2...天」）。这与 /tj 报告「横线挡预览」是同一类问题。
+--   现只把**首行标题**放进候选 text，完整正文登记到 core 的短标题注册表：
+--     · 点候选 / 数字键 → input_statistics 的 group=-1 前置回调查表还原；
+--     · 空格 / 分号 / 引号 → Submit_text.submit_text_for 查表还原；
+--     · 末尾空行 → core.finalize_commit_text 统一补（多行补、单行不补）。
+--   ⇒ 候选栏是一行干净标题，上屏仍是完整多行内容且光标落在末尾空行。
+--   ★ 注释列（"节气查询" 等）是命令标签、不是内容预览，保留不动。
+local core = require "core"
+local function multi_short(full, comment)
+    local title = full:match("^([^\n]+)") or full
+    if core.register_short_full then core.register_short_full(title, full) end
+    return {{title, comment}}
+end
+
 -- === 主函数 +++
 local function schedule(input, seg, env)
     local engine = env.engine
@@ -219,7 +252,7 @@ local function schedule(input, seg, env)
             end
         end
         
-        local candidates = {{jq_info, "节气查询"}}
+        local candidates = multi_short(strip_tail_newline(jq_info), "节气查询")
         generate_candidates("jieqi_query", seg, candidates)
         log_debug("/jq command succeeded")
         
@@ -241,7 +274,7 @@ local function schedule(input, seg, env)
         log_debug("/gz: Date2LunarDate returned: " .. (lunar_info or "nil"))
         gz_detail = gz_detail .. string.format("农历：%s\n", lunar_info)
         
-        local candidates = {{gz_detail, "干支查询"}}
+        local candidates = multi_short(strip_tail_newline(gz_detail), "干支查询")
         generate_candidates("ganzi_query", seg, candidates)
         log_debug("/gz command succeeded")
         
@@ -279,7 +312,7 @@ local function schedule(input, seg, env)
             end
         end
         
-        local candidates = {{date_info, "农历转换"}}
+        local candidates = multi_short(strip_tail_newline(date_info), "农历转换")
         generate_candidates("lunar_query", seg, candidates)
         log_debug("/nl command succeeded")
 
@@ -491,7 +524,7 @@ local function schedule(input, seg, env)
         if not ok then
             log_debug("/jt command failed: " .. err)
         else
-            local candidates = {{summary, ""}}
+            local candidates = multi_short(strip_tail_newline(summary), "")
             generate_candidates("day_summary", seg, candidates)
         end
     end

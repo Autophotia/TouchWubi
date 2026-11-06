@@ -101,7 +101,13 @@ local char_dict_phrases = nil   -- 已废弃：2026-11-01 起不再构建（改�
 local char_dict_done    = false
 
 -- 主词典多字词去重：布隆过滤器（替代 11.8 万条哈希集合，省 ~10MB 常驻）
-local BLOOM_BITS = 1200000
+-- ★ 2026-11-05 修复「自动造词」等合法新词被误判为「主词典已有词」而漏造：
+--   旧 BLOOM_BITS=1200000 装入 ~11.5 万条多字词后，误判率约 0.68%（≈1/147），
+--   真机实测「自动造词」命中误判 ⇒ in_main_dict 误判 true ⇒ build_phrases 跳过造词，
+--   该词永远造不出、转不了正（用户报告「自动乖戾/自动千户/自动选词 都能转正，唯独
+--   自动造词不行」）。放大到位数组 6M 位（≈750KB，仍远低于精确集合的 ~10MB）后，
+--   误判率降到 ~5e-7（≈1/200万），漏造风险可忽略。
+local BLOOM_BITS = 6000000
 local BLOOM_K    = 7
 local bloom_blocks = nil
 
@@ -124,7 +130,7 @@ end
 local function bloom_set(s)
     local h1 = hash_djb2(s)
     local h2 = hash_sdbm(s)
-    if h2 == 0 then h2 = 1 end
+    if h2 % 2 == 0 then h2 = h2 + 1 end   -- 保证 h2 为奇，与偶数模互质，双哈希覆盖完整
     for i = 0, BLOOM_K - 1 do
         local bit_pos = (h1 + i * h2) % BLOOM_BITS
         local block_idx = math.floor(bit_pos / 32) + 1
@@ -141,7 +147,7 @@ local function bloom_check(s)
     if not bloom_blocks then return false end
     local h1 = hash_djb2(s)
     local h2 = hash_sdbm(s)
-    if h2 == 0 then h2 = 1 end
+    if h2 % 2 == 0 then h2 = h2 + 1 end   -- 与 bloom_set 一致，保证奇 h2
     for i = 0, BLOOM_K - 1 do
         local bit_pos = (h1 + i * h2) % BLOOM_BITS
         local block_idx = math.floor(bit_pos / 32) + 1

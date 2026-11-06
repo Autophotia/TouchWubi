@@ -131,6 +131,7 @@ local _pend_ts    = 0           -- 上一个正常编码键按下的时戳（用
 local _hooked     = false       -- update_notifier 是否已连接
 local _hooked_schema = nil      -- 连接时对应的 schema_id（切方案时重连）
 local _was_on     = false       -- 上一次按键时 auto_coined 开关状态（检测「开→关」边沿释放字典）
+local _in_coin    = false       -- 上一次按键时输入区是否含反引号（手动造词进行中 ⇒ 自动造词不捡这些提交）
 
 -- 纯汉字判定：UTF-8 中日韩基本区 U+4E00..U+9FFF ⇒ [\228-\233][\128-\191][\128-\191]
 local CJK_RUN = "[\228-\233][\128-\191][\128-\191]"
@@ -422,9 +423,18 @@ local function detect_and_settle(ctx, src)
         _primed, _last_back, _last_size = true, bt, size
         return
     end
-    local has_new = (size ~= _last_size) or (bt and bt ~= _last_back)
-    _last_back, _last_size = bt or _last_back, size
-    if has_new and bt then
+    -- ★ 2026-11-05 修复 PC 端自动造词失效：PC 小狼毫（旧 librime）的 commit_history
+    --   在 update_notifier 触发时「滞后一拍」——size 尚未递增、back() 返回空串，
+    --   若把空提交当新提交结算，on_commit("") 会 BREAK 清空 _hist，相邻字连不起来
+    --   （沙盒复现：空格上屏「中」「车」后 _hist 被空提交反复清空，造不出「中车」）。
+    --   bt 空时直接跳过且不更新状态，等下一拍 size/back 追上再结算；bt 非空时
+    --   size 已更新（PC 端规律：bt 非空 ⟺ size 已递增），has_new 判定可靠。
+    if bt == nil or bt == "" then
+        return
+    end
+    local has_new = (size ~= _last_size) or (bt ~= _last_back)
+    _last_back, _last_size = bt, size
+    if has_new then
         local ts
         if src == "ntf" then
             ts = os.time()   -- notifier 在提交后立即触发，此刻时戳即提交时刻
@@ -454,6 +464,7 @@ local function hook_notifier(env)
                 local on = false
                 pcall(function() on = c:get_option("auto_coined") end)
                 if not on then return end
+                if _in_coin then return end   -- ★ 手动造词（反引号段）提交不捡，避免逻辑混乱
                 pcall(detect_and_settle, c, "ntf")
             end)
         end
@@ -485,6 +496,10 @@ local function P_func(key_event, env)
     hook_notifier(env)
 
     local input = ctx.input or ""
+    -- ★ 2026-11-05 修复「手动/自动造词逻辑混乱」：输入区含反引号 = 手动造词进行中，
+    --   此时自动造词不得把这些逐字提交捡进 _hist 造成临时词（否则手动造词时也会冒出
+    --   2..5 字带 ☯ 的临时词、且被 MAX_PHRASE=5 截断，与手动「输入多长造多长」语义打架）。
+    _in_coin = (input:find("`") ~= nil)
     local committed, ts = nil, 0
 
     -- Signal A（即时，主力）：空格键将上屏当前选中候选。
@@ -518,7 +533,7 @@ local function P_func(key_event, env)
     if committed and committed ~= "" then
         local ok, err = pcall(on_commit, committed, ts)
         if not ok then klog("auto_coined", "on_commit error: " .. tostring(err)) end
-    else
+    elseif not _in_coin then
         -- Signal B（兜底，共用 detect_and_settle）：数字选词 / 顶字上屏 / 自动上屏等
         detect_and_settle(ctx, "key")
     end

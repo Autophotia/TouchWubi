@@ -1,0 +1,216 @@
+# -*- coding: utf-8 -*-
+"""自动造词 PC 端（真实 rime.dll）探测。
+
+验证 auto_coined 的 Signal A（空格上屏同步入链）+ 临时词召回转正，在 PC weasel
+旧 librime 下是否工作。手动造词已另由 sandbox_coin_space_probe.py 验证。
+
+流程：
+  1. RimeSetOption 开 auto_coined
+  2. kh + 空格上屏「中」；lg + 空格上屏「车」
+  3. 查临时词是否造出（打词组码召回归 ☯ 候选）
+"""
+import ctypes
+from ctypes import c_int, c_void_p, c_char_p, c_size_t, POINTER, Structure, byref
+import os, shutil, tempfile, glob, sys
+
+WEASEL_DIR = r"D:\Program Files\Rime\weasel-0.17.4"
+SHARED_DATA = os.path.join(WEASEL_DIR, "data")
+TOUCHWB_REAL = r"D:\Program Files\Rime\TouchWB"
+TOUCHWB_DEV = r"D:\AutophotiaIME\dev\space\schemas\TouchWB"
+RIME_DLL = os.path.join(WEASEL_DIR, "rime.dll")
+
+
+class RimeTraits(Structure):
+    _fields_ = [
+        ("data_size", c_int), ("shared_data_dir", c_char_p), ("user_data_dir", c_char_p),
+        ("distribution_name", c_char_p), ("distribution_code_name", c_char_p),
+        ("distribution_version", c_char_p), ("app_name", c_char_p),
+        ("modules", POINTER(c_char_p)), ("min_log_level", c_int), ("log_dir", c_char_p),
+        ("prebuilt_data_dir", c_char_p), ("staging_dir", c_char_p),
+    ]
+
+
+class RimeCandidate(Structure):
+    _fields_ = [("text", c_char_p), ("comment", c_char_p), ("reserved", c_void_p)]
+
+
+class RimeMenu(Structure):
+    _fields_ = [
+        ("page_size", c_int), ("page_no", c_int), ("is_last_page", c_int),
+        ("highlighted_candidate_index", c_int), ("num_candidates", c_int),
+        ("candidates", POINTER(RimeCandidate)), ("select_keys", c_char_p),
+    ]
+
+
+class RimeComposition(Structure):
+    _fields_ = [
+        ("length", c_int), ("cursor_pos", c_int), ("sel_start", c_int),
+        ("sel_end", c_int), ("preedit", c_char_p),
+    ]
+
+
+class RimeContext(Structure):
+    _fields_ = [
+        ("data_size", c_int), ("composition", RimeComposition), ("menu", RimeMenu),
+        ("commit_text_preview", c_char_p), ("select_labels", POINTER(c_char_p)),
+    ]
+
+
+class RimeCommit(Structure):
+    _fields_ = [("data_size", c_int), ("text", c_char_p)]
+
+
+def load_lib():
+    os.add_dll_directory(WEASEL_DIR)
+    lib = ctypes.WinDLL(RIME_DLL)
+    lib.RimeSetup.argtypes = [POINTER(RimeTraits)]
+    lib.RimeInitialize.argtypes = [POINTER(RimeTraits)]
+    lib.RimeFinalize.argtypes = []
+    lib.RimeCreateSession.restype = c_size_t
+    lib.RimeCreateSession.argtypes = []
+    lib.RimeDestroySession.argtypes = [c_size_t]
+    lib.RimeSelectSchema.argtypes = [c_size_t, c_char_p]
+    lib.RimeSelectSchema.restype = c_int
+    lib.RimeSimulateKeySequence.argtypes = [c_size_t, c_char_p]
+    lib.RimeSimulateKeySequence.restype = c_int
+    lib.RimeGetContext.argtypes = [c_size_t, POINTER(RimeContext)]
+    lib.RimeGetContext.restype = c_int
+    lib.RimeFreeContext.argtypes = [POINTER(RimeContext)]
+    lib.RimeGetCommit.argtypes = [c_size_t, POINTER(RimeCommit)]
+    lib.RimeGetCommit.restype = c_int
+    lib.RimeFreeCommit.argtypes = [POINTER(RimeCommit)]
+    lib.RimeSetOption.argtypes = [c_size_t, c_char_p, c_int]
+    return lib
+
+
+def make_traits(user_dir, log_dir):
+    t = RimeTraits()
+    t.data_size = ctypes.sizeof(RimeTraits)
+    t.shared_data_dir = SHARED_DATA.encode()
+    t.user_data_dir = user_dir.encode()
+    t.distribution_name = b"Rime"
+    t.distribution_code_name = b"auto_coined_pc"
+    t.distribution_version = b"0.0"
+    t.app_name = b"sandbox_auto_coined_pc"
+    t.min_log_level = 0
+    t.log_dir = log_dir.encode()
+    return t
+
+
+def get_context(lib, sid):
+    ctx = RimeContext()
+    ctx.data_size = ctypes.sizeof(RimeContext)
+    if not lib.RimeGetContext(sid, byref(ctx)):
+        return None
+    return ctx
+
+
+def dump(ctx, label):
+    if ctx is None:
+        print(f"  [{label}] <no context>")
+        return
+    preedit = ctx.composition.preedit.decode() if ctx.composition.preedit else ""
+    n = ctx.menu.num_candidates
+    cands = [ctx.menu.candidates[i].text.decode() for i in range(n)]
+    comments = [ctx.menu.candidates[i].comment.decode() if ctx.menu.candidates[i].comment else "" for i in range(n)]
+    print(f"  [{label}] preedit={preedit!r}")
+    for i in range(n):
+        print(f"      {i+1}. {cands[i]!r}  comment={comments[i]!r}")
+
+
+def press(lib, sid, seq):
+    lib.RimeSimulateKeySequence(sid, seq.encode())
+    out = ""
+    cmt = RimeCommit()
+    cmt.data_size = ctypes.sizeof(RimeCommit)
+    if lib.RimeGetCommit(sid, byref(cmt)) and cmt.text:
+        out = cmt.text.decode("utf-8", "replace")
+    lib.RimeFreeCommit(byref(cmt))
+    return out
+
+
+def main():
+    tmp = tempfile.mkdtemp(prefix="auto_pc_")
+    user_dir = os.path.join(tmp, "user")
+    log_dir = os.path.join(tmp, "log")
+    os.makedirs(log_dir, exist_ok=True)
+    print(f"[*] 复制真机目录 -> {user_dir}")
+    shutil.copytree(TOUCHWB_REAL, user_dir, ignore=shutil.ignore_patterns("*.userdb"))
+
+    overlay = [
+        "lua/core.lua", "lua/types.lua", "lua/Submit_text.lua",
+        "lua/user_coined_db.lua", "lua/user_coined_cmd.lua",
+        "lua/user_coined_translator.lua", "lua/auto_coined.lua",
+    ]
+    for rel in overlay:
+        src = os.path.join(TOUCHWB_DEV, rel)
+        dst = os.path.join(user_dir, rel)
+        if os.path.exists(src):
+            shutil.copyfile(src, dst)
+        else:
+            print(f"    MISS {rel}")
+
+    # 注入 debug：开 auto_coined + COIN 两个 tag
+    core_path = os.path.join(user_dir, "lua", "core.lua")
+    with open(core_path, "r", encoding="utf-8") as f:
+        s = f.read()
+    s2 = s.replace("    debug_tags = {},",
+                   '    debug_tags = { ["auto_coined"] = true, ["COIN:"] = true },')
+    with open(core_path, "w", encoding="utf-8") as f:
+        f.write(s2)
+    print("[*] 注入 debug_tags = { auto_coined, COIN: }")
+
+    lib = load_lib()
+    traits = make_traits(user_dir, log_dir)
+    lib.RimeSetup(byref(traits))
+    lib.RimeInitialize(byref(traits))
+    sid = lib.RimeCreateSession()
+    lib.RimeSelectSchema(sid, b"ly_wubi")
+    print("[*] schema = ly_wubi")
+
+    # 开 auto_coined
+    lib.RimeSetOption(sid, b"auto_coined", 1)
+    print("[*] auto_coined 已开启")
+
+    print("\n=== 打「中」kh ===")
+    press(lib, sid, "kh")
+    dump(get_context(lib, sid), "kh")
+    c = press(lib, sid, " ")
+    print(f"  [commit] {c!r}")
+
+    print("\n=== 打「车」lg ===")
+    press(lib, sid, "lg")
+    dump(get_context(lib, sid), "lg")
+    c = press(lib, sid, " ")
+    print(f"  [commit] {c!r}")
+
+    # 召回归：打「中车」词组码（2字词=每字前2码）。中=kh 车=lg => khlg
+    print("\n=== 打 khlg 召回归 ===")
+    press(lib, sid, "khlg")
+    dump(get_context(lib, sid), "khlg")
+
+    # 上屏第一候选（如果是中车☯）
+    c = press(lib, sid, " ")
+    print(f"  [commit] {c!r}")
+
+    # /zctj 看永久词
+    print("\n=== /zctj ===")
+    press(lib, sid, "{Escape}")
+    press(lib, sid, "/zctj")
+    dump(get_context(lib, sid), "/zctj")
+
+    lib.RimeDestroySession(sid)
+    lib.RimeFinalize()
+
+    print("\n=== touchwb_debug.log (auto_coined/COIN) ===")
+    for lp in glob.glob(os.path.join(user_dir, "touchwb_debug.log")):
+        with open(lp, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if "auto_coined" in line or "COIN" in line:
+                    print("  " + line.rstrip())
+
+    print("\n[*] done. user_dir =", user_dir)
+
+
+if __name__ == "__main__":
+    main()

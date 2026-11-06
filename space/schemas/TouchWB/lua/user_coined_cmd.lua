@@ -11,7 +11,8 @@
 --     /zctj        统计（自造词条数 + 备份条数）+ 倒序全量列表
 --     /zcscNN      删除倒序第 NN 条（序号固定 2 位，01 = 最近造的那条，上限 99）
 --     /zccx        撤销：一键删除最后造的词
---     /zcqk        清空全部（清空前自动备份到 lua/user_coined.txt）
+--     /zcqk        清空全部永久词（清空前自动备份到 lua/user_coined.txt）
+--     /zcql        清空临时词（自动造词的待转正半成品，不备份，删了不可恢复）
 --     /zcdr        导入：从备份 txt 合并恢复（只补当前没有的词）
 --
 --   「备份」不单设命令，与 /zctj 合用：有备份就显示「有备份：共 N 条」。
@@ -67,7 +68,12 @@ local HEADER = {
 -- 备份文件路径：lua/user_coined.txt（与 userdb 同名 user_coined、txt 方便查看，放 lua/ 下
 --   与联想 assoc_*.txt、调序 tips 数据平级统一。方案 B 下主词库在 C++ UserDb，备份仍写 txt，
 --   因备份是低频操作，不影响打字性能）。
+-- ★ 2026-11-05 修复 /zctj 卡顿：旧实现每次调用都 os.execute('mkdir -p')，Windows 下每 spawn
+--   一次 shell 卡 1~2 秒（正是「t 和 j 之间卡顿」根因）。改为：路径缓存 + 目录探测只在首次做，
+--   且先用 io.open 快探测，失败才 fallback os.execute（同 lib/basic.lua 的 get_log_file_path 套路）。
+local _bak_path_cached = nil
 local function get_bak_path()
+    if _bak_path_cached then return _bak_path_cached end
     local p = nil
     pcall(function()
         local d = rime_api and rime_api.get_user_data_dir and rime_api.get_user_data_dir() or ""
@@ -76,11 +82,19 @@ local function get_bak_path()
             if d:sub(-1) ~= "/" then d = d .. "/" end
             local dir = d .. "lua"
             p = dir .. "/user_coined.txt"
-            -- 确保 lua/ 目录存在（联想/调序的 LevelDb 通常会先创建，这里兜底）
-            pcall(function() os.execute('mkdir -p "' .. dir .. '" 2>/dev/null') end)
+            -- 确保 lua/ 目录存在（联想/调序的 LevelDb 通常会先创建，这里兜底）——只在首次
+            local probe = dir .. "/.touchwb_probe"
+            local f = io.open(probe, "a")
+            if f then
+                f:close()
+                os.remove(probe)
+            else
+                pcall(function() os.execute('mkdir -p "' .. dir .. '" 2>/dev/null') end)
+            end
         end
     end)
-    return p or ""
+    _bak_path_cached = p or ""
+    return _bak_path_cached
 end
 
 -- ============================================================
@@ -296,6 +310,25 @@ local function op_clear_all()
     return true, string.format("已清空 %d 条自造词（词条均已在备份中）", #entries), 0
 end
 
+-- 清空临时词 /zcql：自动造词的待转正半成品，不备份、不可恢复。
+-- ★ 与 /zcqk 严格分离：永久词是「用户确认过的词库」、清空要备份兜底；
+--   临时词是「自动造词工作区缓冲」，本身有自动淘汰（200 次提交未召回 / 300 条上限），
+--   手动清它属于「一键重置待转正缓冲」，丢了重打即可，无需备份。
+local function op_clear_temp()
+    local clearf = db.uc_clear_temp
+    local listf  = db.uc_list_temp
+    if type(clearf) ~= "function" then return false, "临时词清空不可用" end
+    local n = 0
+    if type(listf) == "function" then
+        local ok, rows = pcall(listf)
+        if ok and rows then n = #rows end
+    end
+    if n == 0 then return false, "暂无临时词" end
+    local ok = pcall(clearf)
+    if not ok then return false, "清空失败" end
+    return true, string.format("已清空 %d 条临时词（永久词不受影响）", n), 0
+end
+
 -- 导入恢复 /zcdr：把备份里的词条并回当前库（合并去重，只补缺）。
 -- ★ 合并去重而非覆盖：覆盖会把「清空之后到现在」新造的词一起抹掉，
 --   而真实的后悔场景基本都是「清空后想找回」，合并才不倒退。
@@ -362,6 +395,7 @@ local function parse_cmd(inp)
     if inp:match("^/zcsc%d?$") then return "del_list" end
     if inp == "/zccx" then return "del_last" end
     if inp == "/zcqk" then return "clear" end
+    if inp == "/zcql" then return "clear_temp" end
     if inp == "/zctj" then return "stat" end
     if inp == "/zcdr" then return "restore" end
     return nil
@@ -511,6 +545,8 @@ local function F(input, env)
         ok, msg, left = op_delete_last()
     elseif kind == "clear" then
         ok, msg, left = op_clear_all()
+    elseif kind == "clear_temp" then
+        ok, msg, left = op_clear_temp()
     elseif kind == "restore" then
         ok, msg, left = op_restore()
     end
@@ -527,6 +563,8 @@ local function F(input, env)
             comment = "/zcdr 可从备份导入"
         elseif kind == "restore" then
             comment = "/zctj 查看当前条数"
+        elseif kind == "clear_temp" then
+            comment = "继续打字会自动重新累积"
         elseif left and left > 0 then
             comment = string.format("还剩 %d 条", left)
         end

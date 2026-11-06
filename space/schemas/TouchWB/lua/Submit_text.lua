@@ -116,6 +116,70 @@ local _coin_last_text     = nil
 local _coin_hooked        = false
 local _coin_hooked_schema = nil
 
+-- ★ 2026-11-05 修复 PC 端手动造词失效：逐字累积原来只依赖 update_notifier 的
+--   commit_history，但 PC 小狼毫（weasel-0.17.4 旧 librime）下 update_notifier 回调里
+--   commit_history.size 恒 0、back() 恒 nil（沙盒已复现），导致累积永远不触发。
+--   修复：抽出统一累积函数，按键同步路径（空格/分号/引号上屏）在 engine:commit_text
+--   之后立即累积，不再依赖 notifier；notifier 路径保留给移动端「点候选栏上屏」。
+--   src 仅用于日志区分 "key" / "ntf"。
+local function coin_accumulate(text, code_input, src)
+    if text == nil or text == "" then return end
+    local n = db.u8len(text)
+    if n >= 1 and not text:find("%a") then
+        _coin_buf[#_coin_buf + 1] = text
+        _coin_code_buf[#_coin_code_buf + 1] = code_input or ""
+        kcoin(src or "acc", "buf+1 [" .. text .. "] => [" .. table.concat(_coin_buf) .. "]")
+    else
+        kcoin(src or "acc", "skip 非合规 [" .. tostring(text) .. "]")
+    end
+end
+
+-- ★ 同步路径累积入口：消费 _coin_pending_input（置 nil）后累积，避免紧随其后的
+--   update_notifier 又把同一次提交重复累积（notifier 里 _coin_pending_input 已 nil ⇒ 直接 return）。
+local function coin_accumulate_sync(text)
+    if text == nil or text == "" then return end
+    if _coin_pending_input == nil then return end
+    local pend = _coin_pending_input
+    _coin_pending_input = nil
+    coin_accumulate(text, pend, "key")
+end
+
+-- ★★ 【候选上屏文本统一收尾 · 2026-11-05/06】★★
+--   用户规则：**上屏后是多行内容的，末尾留一个空行（光标落到内容后的空行，
+--   避免接着打字粘在上屏内容尾部）；上屏后仅一行（时间、日期、提示、符号）
+--   不加回车，要能直接接着打字。**
+--   ★ 候选栏文本一律不动（除 /h、/tj 的短标题外，候选本来就单行；把 \n 写进
+--     候选 text 会让前端在候选栏渲染出空白，又变成「横线挡预览」那类问题），
+--     \n 只在「已选中、提交时」补。
+--   按 type 展开短标题，再统一交给 core.finalize_commit_text 收尾：
+--     help_short  /h 首候选 → core.state.help_overview（整份总览，末尾带 \n）
+--     help        /h 分组行 → 原文 .. "\n"（★ 特例：分组行本身单行，但用户
+--                 2026-11-05 明确要求「每条命令候选末尾留空行」且已真机验收）
+--     stat_short  /tj /js   → core.expand_stat_short 查表取完整报告（自身带 \n）
+--     多行命令    /jt /jq /gz /nl /txtj → core.expand_short_full 查表取完整段落
+--     其它        → 原样，再由 finalize 判断「多行补 \n / 单行不加」
+--   点候选 / 数字键走 help_cmd / input_statistics 的 group=-1 前置回调，
+--   本函数只负责 Lua 快捷上屏（空格 / 分号 / 引号）这三条不走 notifier 的路径。
+--   ★ 三处共用，避免各路径行为漂移；finalize 幂等，已有 \n 不会再补。
+local function submit_text_for(sel_text, sel_type)
+    if not sel_text or sel_text == "" then return sel_text end
+    local out = sel_text
+    if sel_type == "help_short" and core.state.help_overview then
+        out = core.state.help_overview
+    elseif sel_type == "help" then
+        out = (out:sub(-1) == "\n") and out or (out .. "\n")
+    elseif sel_type == "stat_short" and core.expand_stat_short then
+        out = core.expand_stat_short(out) or out
+    elseif core.expand_short_full then
+        -- 通用多行命令候选（/jt /jq /gz /nl /txtj）：候选栏 text 只是首行标题，
+        -- 这里查 core 的短标题注册表还原完整段落。精确匹配 ⇒ 普通候选不受影响。
+        out = core.expand_short_full(out) or out
+    end
+    -- 通用收尾：多行（含 \n）且末尾无 \n → 补 1 个；单行原样返回。
+    -- 覆盖 /jq /gz /nl /jt 多行信息、/txtj 调序统计等所有命令候选。
+    return core.finalize_commit_text(out)
+end
+
 local function coin_hook_notifier(env)
     local ctx = env and env.engine and env.engine.context
     if not ctx then return end
@@ -149,14 +213,7 @@ local function coin_hook_notifier(env)
 
                 local pending_input = _coin_pending_input
                 _coin_pending_input = nil
-                local n = db.u8len(bt)
-                if n >= 1 and not bt:find("%a") then
-                    _coin_buf[#_coin_buf + 1] = bt
-                    _coin_code_buf[#_coin_code_buf + 1] = pending_input or ""
-                    kcoin("ntf", "buf+1 [" .. bt .. "] => [" .. table.concat(_coin_buf) .. "]")
-                else
-                    kcoin("ntf", "skip 非合规 [" .. tostring(bt) .. "]")
-                end
+                coin_accumulate(bt, pending_input, "ntf")
             end)
         end
     end)
@@ -286,6 +343,11 @@ local function commit_text_processor(key, env)
     end
 
     -- 空格语义：有菜单就上屏选中（首）候选
+    -- ★ 短标题 / 命令候选的上屏文本统一走 submit_text_for()：
+    --   /h 首候选 help_short、/h 分组行 help、/tj /js 的 stat_short。
+    --   点候选 / 数字键由各模块的 group=-1 前置 notifier 回调处理；空格走本文件
+    --   的 engine:commit_text 快捷上屏、**不经过那些 notifier**，故在此补齐，
+    --   保证空格 / 数字键 / 点候选三条路径内容完全一致（含末尾空行）。
     if is_space_key and context:has_menu() then
         local sel = nil
         if segment then sel = segment:get_selected_candidate() end
@@ -293,9 +355,12 @@ local function commit_text_processor(key, env)
             sel = context:get_selected_candidate()
         end
         if sel and sel.text and sel.text ~= "" then
+            local _ct = submit_text_for(sel.text, sel.type)
             context:clear()
-            engine:commit_text(sel.text)
-            if core.stats_report then core.stats_report(sel.text) end
+            engine:commit_text(_ct)
+            -- ★ 手动造词同步累积（PC 端 notifier 的 commit_history 不可用，见 coin_accumulate）
+            coin_accumulate_sync(_ct)
+            if core.stats_report then core.stats_report(_ct) end
             return 1
         end
     end
@@ -310,9 +375,12 @@ local function commit_text_processor(key, env)
         klog("Submit_text", "apostrophe key pressed, input=[" .. tostring(context.input) .. "] input_len=" .. tostring(#(context.input or "")) .. " has_menu=" .. tostring(context:has_menu()) .. " is_composing=" .. tostring(context:is_composing()) .. " comp_empty=" .. tostring(composition:empty()) .. " prediction=" .. tostring(context:get_option("prediction")) .. " last_3th_text=" .. (env.last_3th_text and env.last_3th_text.text or "nil"))
         if context.input and context.input ~= "" and env.last_3th_text and env.last_3th_text.text ~= "" then
             klog("Submit_text", "committing 3rd candidate: " .. env.last_3th_text.text)
+            -- /h 分组行等命令候选同样需要上屏末尾空行（与空格/点候选路径一致）
+            local _ct = submit_text_for(env.last_3th_text.text, env.last_3th_text.type)
             context:clear()
-            engine:commit_text(env.last_3th_text.text)
-            if core.stats_report then core.stats_report(env.last_3th_text.text) end
+            engine:commit_text(_ct)
+            coin_accumulate_sync(_ct)
+            if core.stats_report then core.stats_report(_ct) end
             return 1
         end
     end
@@ -322,9 +390,12 @@ local function commit_text_processor(key, env)
         klog("Submit_text", "semicolon key pressed, input=[" .. tostring(context.input) .. "] input_len=" .. tostring(#(context.input or "")) .. " has_menu=" .. tostring(context:has_menu()) .. " is_composing=" .. tostring(context:is_composing()) .. " comp_empty=" .. tostring(composition:empty()) .. " prediction=" .. tostring(context:get_option("prediction")) .. " last_2th_text=" .. (env.last_2th_text and env.last_2th_text.text or "nil"))
         if context.input and context.input ~= "" and env.last_2th_text and env.last_2th_text.text ~= "" then
             klog("Submit_text", "committing 2nd candidate: " .. env.last_2th_text.text)
+            -- 同上：分号上屏第 2 候选也走统一展开（/h 第 2 候选是「日期」分组行）
+            local _ct = submit_text_for(env.last_2th_text.text, env.last_2th_text.type)
             context:clear()
-            engine:commit_text(env.last_2th_text.text)
-            if core.stats_report then core.stats_report(env.last_2th_text.text) end
+            engine:commit_text(_ct)
+            coin_accumulate_sync(_ct)
+            if core.stats_report then core.stats_report(_ct) end
             return 1
         end
     end

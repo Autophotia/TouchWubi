@@ -9,7 +9,10 @@ SRC = r'D:/AutophotiaIME/dev/space/schemas/TouchWB/lua/input_statistics.lua'
 src = open(SRC, encoding='utf-8').read()
 
 # 抽取真实的 report_commit_text 函数体
-m = re.search(r'local function report_commit_text\(commit_text\)(.*?)\nend\n\n-- 暴露到全局',
+# ★ 2026-11-05：原锚点 `-- 暴露到全局` 早已改名 `-- 注入到 core`，导致本单测
+#   长期静默失效（assert 未找到函数）。改为按「行首顶格 end」收尾，不依赖注释
+#   文本 —— 函数体内部的 end 都有缩进，\nend\n 只会匹配函数真正的结尾。
+m = re.search(r'local function report_commit_text\(commit_text\)(.*?)\nend\n',
               src, re.DOTALL)
 assert m, '未找到 report_commit_text'
 func_body = 'local function report_commit_text(commit_text)' + m.group(1) + '\nend'

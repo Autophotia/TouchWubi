@@ -240,4 +240,65 @@ end
 -- 注意：这是「跨模块函数注入」，非瞬时状态信号，故挂在 core 上而非 core.state。
 core.stats_report = nil
 
+-- == 短标题候选的「全文查表」钩子 core.expand_stat_short ==
+-- 写点：input_statistics.lua 模块加载时注入 stat_expand_lookup（/tj /js 用）。
+-- 读点：Submit_text.lua 空格快捷上屏（不经过 notifier，需自己查表取完整报告）。
+-- 同属跨模块函数注入，故挂在 core 上；返回 nil 表示该候选不需要展开。
+-- 注：/h 的总览是固定常量，走 core.state.help_overview，不经过这里。
+core.expand_stat_short = nil
+
+-- ============================================================================
+-- == 多行命令候选「候选栏只显标题 / 上屏还原全文」注册表（2026-11-06）==
+-- ============================================================================
+--   用户规则：**有多行内容的命令候选，候选栏只显示首行标题，不显示正文预览**；
+--   点选 / 空格 / 数字键上屏时再还原成完整多行内容（末尾空行统一由
+--   core.finalize_commit_text 补）。
+--   ★ 为什么不能把多行正文写进候选 text：Rime 候选栏显示与上屏同源
+--     （都取 cand->text()），多行 text 会被前端压平成「标题 + 正文截断」的
+--     长串（用户实测 /jt 候选「嗨，下午好!〔…〕」后面拖着「2...天」），
+--     与 /tj 报告「横线挡预览」是同一类问题。
+--   ★ 写点：schedule.lua（/jt /jq /gz /nl）、super_sequence.lua（/txtj）生成
+--     候选时登记 title → full；读点：input_statistics 的 group=-1 前置回调
+--     （点候选 / 数字键）、Submit_text.submit_text_for（空格 / 分号 / 引号）。
+--   ★ 精确匹配（非前缀）：只有登记过的标题才展开，普通候选绝不受影响；
+--     覆盖式登记、**不清空表**（防止个别平台「选中前又重新 compose」把表
+--     清掉，导致只上屏标题）。标题含实时时间等动态内容，同键覆盖即可。
+--   ★ 表挂在 core 模块级 local（Lua require 缓存 ⇒ 全 engine 共享一份），
+--     它是跨模块函数/数据而非瞬时信号，故不放 core.state。
+local SHORT_FULL_MULTI = {}
+
+function core.register_short_full(short, full)
+    if type(short) ~= "string" or short == "" then return end
+    if type(full) ~= "string" or full == "" then return end
+    SHORT_FULL_MULTI[short] = full
+end
+
+function core.expand_short_full(text)
+    if type(text) ~= "string" or text == "" then return nil end
+    return SHORT_FULL_MULTI[text]
+end
+
+-- ============================================================================
+-- == 上屏文本统一收尾 core.finalize_commit_text（2026-11-06 用户规则，已接通）==
+-- ============================================================================
+--   用户口径：「以『尾部空行』为原则，让其它上屏后是多行内容的段落加上尾部
+--   空行；上屏后仅一行（时间日期啥的）就不需要加回车。」
+--   目的：多行内容上屏后光标落到内容后的空行，避免接着打字粘在上屏内容尾部；
+--   单行值型内容则要能直接接着打字，不能凭空断行。
+--   ★ 只补不删、天然幂等：末尾已有 \n 原样返回；多个 notifier 回调重复跑无妨。
+--   ★ 例外：/h 分组行是单行清单，但用户 2026-11-05 明确要求「每条命令候选
+--     末尾都留空行」且已真机验收 ⇒ 由 help_cmd / Submit_text 显式追加 TAIL，
+--     本函数不会把它删掉（也不会给其它单行文本加）。
+--   ★ 两个调用点覆盖全部上屏路径（2026-11-06 接通，此前本函数零调用）：
+--     · Submit_text.submit_text_for   → 空格 / 分号 / 引号（Lua 快捷上屏）
+--     · input_statistics 的 expand    → 点候选 / 数字键（group=-1 前置回调，
+--       挂在组件 init 上，覆盖所有候选，不限于 /tj /js）
+function core.finalize_commit_text(s)
+    if type(s) ~= "string" or s == "" then return s end
+    if s:find("\n", 1, true) and s:sub(-1) ~= "\n" then
+        return s .. "\n"
+    end
+    return s
+end
+
 return core

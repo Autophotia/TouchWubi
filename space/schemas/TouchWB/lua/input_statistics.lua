@@ -17,7 +17,8 @@
 -- 日期：2025-10-25
 -- 
 -- 命令列表：
---   显示统计：    /tj     - 在候选栏显示日、周、月、年统计报告
+--   显示统计：    /tj     - 候选栏显示「今日/本周/本月/本年统计」4 条短标题，
+--                          点选 / 空格上屏对应的完整统计报告
 --   清空统计：    /qk     - 清空所有统计数据（保留昨日数据）
 --   开始临时统计：/ks     - 开始临时统计会话
 --   结束临时统计：/js     - 结束临时统计并生成报告
@@ -38,6 +39,23 @@
 -- 【平台配置】请根据您的使用平台修改以下变量
 --   PC版（小狼毫/鼠须管）：MOBILE_MODE = false   （提示不上屏，报告可上屏）
 --   手机版（同文/小企鹅）：MOBILE_MODE = true    （所有内容都可上屏）
+
+-- ★★ 【/tj 候选栏短标题 · 2026-11-05 深夜】★★
+--   旧版把整份多行报告塞进候选 text：报告第 2 行是 12 个「─」分隔线，
+--   手机候选栏把换行压平后，看到的就是「一条横线 + 被挤掉/盖住的文字」，
+--   日 / 周 / 月 / 年四条候选长得一模一样，完全没法预览。
+--   Rime 的「候选栏显示文本」与「上屏文本」同源（都取 Candidate::text()），
+--   所以**不能**只把候选改成 "今日统计" 就完事 —— 那样上屏也只剩标题。
+--   本方案复用 help_cmd.lua 已用真实 rime.dll 验证过的机制：
+--     · 候选栏：只显示短标题，可带一个紧凑摘要（如 "◉ 今日统计 · 1234字"）；
+--     · 点候选 / 数字键：init 里挂 group = -1 的 select/commit 前置回调，
+--       抢在 C++ 拼 commit text 之前把选中候选的 text 还原成完整报告；
+--     · 空格：走 Submit_text 的 Lua 快捷上屏（不经 notifier），由
+--       core.expand_stat_short 查表取全文。
+--   报告正文（含分隔线、多行排版）一字不改，只是不再出现在候选栏。
+--   ★ 短标题统一以 `◉` 开头：沿用 report_commit_text 的 `^[※◉]` 过滤，
+--     保证「查看统计」这个动作本身不会被计入输入统计。
+-- ============================================================
 
 local SEPARATOR_LINE = string.rep("─", 12)
 local core = require "core"
@@ -765,13 +783,96 @@ local function is_empty_report(str)
 end
 
 -- 根据平台生成候选（所有内容都放在 text 中，确保候选词可见）
-local function create_candidate(seg, content)
-    return Candidate("stat", seg.start, seg._end, content, "")
+-- /qk /ks /tc 的提示消息本就是单行短文本，直接放 text，无需展开。
+local function create_message_candidate(seg, message)
+    return Candidate("stat", seg.start, seg._end, message, "")
 end
 
-local function create_message_candidate(seg, message)
-    -- 提示消息始终放在 text 中，确保所有平台都能显示
-    return Candidate("stat", seg.start, seg._end, message, "")
+-- ============================================================================
+-- == 短标题 → 完整报告（/tj 四期统计、/js 临时统计）==
+-- ============================================================================
+-- 固定 key（短标题前缀）→ 完整报告。key 不含动态摘要，故表永远只有 4~5 条，
+-- 每次 /tj /js 重新生成时**覆盖而非清空**：防止个别平台「选中前又重新 compose」
+-- 把表清掉，导致只上屏短标题。
+local SHORT_FULL = {}
+local BRIEF_IN_TITLE = true   -- 改 false ⇒ 候选栏只显示纯标题「◉ 今日统计」
+
+local function stat_expand_lookup(text)
+    if not text or text == "" then return nil end
+    for key, full in pairs(SHORT_FULL) do
+        -- 前缀匹配：候选文本 = key .. " · 1234字"；完整报告本身也以 key 开头，
+        -- 此时查回自己 ⇒ 调用方判 full == text 即跳过，天然幂等。
+        if text:sub(1, #key) == key then return full end
+    end
+    return nil
+end
+
+-- 供 Submit_text 的空格快捷上屏查询（跨模块函数注入，与 core.stats_report 同风格：
+-- 挂 core 而非 core.state —— 它是函数，不是瞬时状态信号）。
+core.expand_stat_short = stat_expand_lookup
+
+-- 候选栏摘要：只放一个最关心的数字，够短、不会像整份报告那样被候选栏挤没。
+local function brief_for(s)
+    if not s or (s.count or 0) == 0 then return " · 无记录" end
+    return string.format(" · %d字", s.length or 0)
+end
+
+-- 候选栏只 yield 短标题；完整报告记入 SHORT_FULL，选中时由 hook_expand 还原。
+local function yield_report(seg, key, brief, full)
+    SHORT_FULL[key] = full
+    local short = BRIEF_IN_TITLE and (key .. brief) or key
+    yield(Candidate("stat_short", seg.start, seg._end, short, ""))
+end
+
+-- group = -1 前置回调：抢在 C++ Engine::OnCommit 之前把候选 text 改回完整报告，
+-- 并给「多行上屏内容」统一补一个尾部换行（见下方 expand 的第 ② 步）。
+-- ★ 默认 group 时 C++ 已先 sink 短标题，再改就来不及（实测只上屏标题）。
+--   select_notifier 与 commit_notifier 都挂，任一生效即可、互为兼容兜底。
+-- ★ 闭包只捕获模块级 Lua 值，**绝不持有 engine / ctx 等 C++ userdata**
+--   （否则 RimeDestroySession 时 use-after-free，见 help_cmd.lua 事故说明）。
+-- ★ context 级 property 闩锁：切方案会重建 translator（新 env）但 Context 不变，
+--   只用 env 标记会重复连接；property 不带 `_` 前缀 ⇒ 不会被瞬时选项清理。
+-- ★ 本回调是**全方案通用**的（4 个五笔 schema 都注册了本 translator，init 时
+--   无条件安装）：不只管 /tj /js，任意模块的候选只要上屏文本是多行，都会收尾。
+local function hook_expand(env)
+    local ctx = env and env.engine and env.engine.context
+    if not ctx then return end
+    if ctx:get_property("stat_expand_hooked") == "1" then return end
+    ctx:set_property("stat_expand_hooked", "1")
+    local function expand(c)
+        pcall(function()
+            -- ① 短标题 → 还原完整内容（/tj /js 报告 + 多行命令的首行标题）
+            --    ★ 优先用选中候选自身的 text 查表：get_commit_text() 在多段拼接时
+            --      未必等于标题；cand.text 才是精确的候选栏文本。
+            --    ★ core.expand_short_full 是「精确匹配」的通用表，覆盖 schedule.lua
+            --      的 /jt /jq /gz /nl、super_sequence.lua 的 /txtj 等所有多行命令；
+            --      与 stat_expand_lookup（前缀匹配）互不冲突，天然幂等
+            --      （展开后 text 已是全文，末尾补上 \n 后精确/前缀都不会再命中）。
+            local cand0 = c:get_selected_candidate()
+            local t = (cand0 and cand0.text) or c:get_commit_text()
+            local full = stat_expand_lookup(t) or core.expand_short_full(t)
+            if full and full ~= t and cand0 then cand0.text = full end
+            -- ② 通用收尾（2026-11-06 用户规则）：任意候选的上屏文本，
+            --    **多行且末尾没有 \n** → 补 1 个 \n（光标落到内容后的空行，
+            --    避免接着打字粘在上屏内容尾部）；**单行一律不动**（时间/日期/
+            --    提示/符号要能直接接着打字）。
+            --    覆盖 schedule.lua 的 /jq /gz /nl /jt 多行信息、
+            --    super_sequence.lua 的 /txtj 调序统计等所有命令候选。
+            --    ★ 幂等：已有 \n 原样；与 help_cmd 的 group=-1 回调互不干扰
+            --      （短标题、/h 分组行是单行，本回调不会改它们，
+            --       help_cmd 展开后的 OVERVIEW / line..\n 末尾已有 \n 也不再补）。
+            --    ★ 候选栏 text 从未被塞入尾部 \n，前端不会渲染空白。
+            local cand = c:get_selected_candidate()
+            if cand and cand.text and cand.text ~= "" then
+                local fixed = core.finalize_commit_text(cand.text)
+                if fixed ~= cand.text then cand.text = fixed end
+            end
+        end)
+    end
+    pcall(function()
+        ctx.select_notifier:connect(expand, -1)
+        ctx.commit_notifier:connect(expand, -1)
+    end)
 end
 
 -- 转换器函数：处理统计命令
@@ -811,10 +912,12 @@ local function translator(input, seg, env)
         local weekly = format_weekly_summary(schema_name)
         local monthly = format_monthly_summary(schema_name)
         local yearly = format_yearly_summary(schema_name)
-        yield(create_candidate(seg, daily))
-        yield(create_candidate(seg, weekly))
-        yield(create_candidate(seg, monthly))
-        yield(create_candidate(seg, yearly))
+        -- ★ 候选栏只有 4 条短标题（可带字数摘要）；点选 / 空格上屏的仍是
+        --   上面四份完整报告。顺序保持「今日 / 本周 / 本月 / 本年」不变。
+        yield_report(seg, "◉ 今日统计", brief_for(input_stats.daily), daily)
+        yield_report(seg, "◉ 本周统计", brief_for(input_stats.weekly), weekly)
+        yield_report(seg, "◉ 本月统计", brief_for(input_stats.monthly), monthly)
+        yield_report(seg, "◉ 本年统计", brief_for(input_stats.yearly), yearly)
     elseif input == "/qk" then
         local yesterday_data = input_stats.yesterday or {count = 0, length = 0, fastest = 0, ts = 0}
         input_stats = {
@@ -846,7 +949,9 @@ local function translator(input, seg, env)
             env.temp_stats.is_collecting = false
             env.temp_stats.last_slash_time = os.time()
             local report = format_custom_summary(env.temp_stats, schema_name)
-            yield(Candidate("stat", seg.start, seg._end, report, ""))
+            -- /js 的报告同样是多行带分隔线，一并走短标题（否则候选栏仍是横线）
+            yield_report(seg, "◉ 临时统计报告",
+                         string.format(" · %d字", env.temp_stats.length or 0), report)
         else
             yield(Candidate("stat", seg.start, seg._end, "※ 当前没有进行中的临时统计", ""))
         end
@@ -889,6 +994,10 @@ local function init(env)
         fastest = 0,
         recent = {}
     }
+
+    -- ★ /tj /js 短标题 → 完整报告：挂 group = -1 的前置回调（早于下面的
+    --   统计回调与 C++ OnCommit）。该函数带 context 级闩锁，切方案不会重复连。
+    hook_expand(env)
 
     -- 注册提交通知回调
     if ctx and ctx.commit_notifier then

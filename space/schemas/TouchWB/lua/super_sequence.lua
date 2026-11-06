@@ -1498,7 +1498,17 @@ function F.func(input, env)
             end
             local header = "=== 调序统计 ===\n共 " .. count .. " 条记录（含备份）\n------------------------\n"
             local content = header .. table.concat(lines, "\n")
-            yield(Candidate("query_db", 0, #context.input, content, "按空格上屏"))
+            -- ★ 2026-11-06：多行内容候选栏只显首行标题，上屏还原全文
+            --   （与 /jt /jq /gz /nl 同一机制，见 core.register_short_full 注释）。
+            --   候选栏不再拖着「1. xxx 2. xxx …」的正文预览；末尾空行由
+            --   core.finalize_commit_text 在提交时统一补。
+            local title = content:match("^([^\n]+)") or content
+            if core.register_short_full then
+                core.register_short_full(title, content)
+                yield(Candidate("query_db", 0, #context.input, title, "按空格上屏"))
+            else
+                yield(Candidate("query_db", 0, #context.input, content, "按空格上屏"))
+            end
         end
         return
     end
