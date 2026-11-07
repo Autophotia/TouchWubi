@@ -154,6 +154,12 @@ local _cleared_schemas = {}
 -- 按方案存储的数据库连接
 local _user_dbs = {}
 
+-- ★ 打开失败负缓存：记录每个方案上次打开失败的时间戳。
+--   失败后短时间内直接降级（联想/调序本次不生效），不再反复抢 LOCK、
+--   也不再触发全量 GC —— 消除「双引擎实例抢写锁」在按键路径的卡顿放大。
+local _db_fail_at = {}
+local DB_RETRY_INTERVAL = 5 -- 秒
+
 -- 获取方案特定的数据库文件名
 local function get_db_file_name(schema_id)
     local base_name = is_ios_device() and
@@ -169,50 +175,51 @@ end
 
 local function get_user_db(schema_id)
     if not schema_id then return nil, function() end end
-    
+
     -- 如果数据库连接已存在且正常，直接返回
     if _user_dbs[schema_id] and _user_dbs[schema_id]:loaded() then
+        _db_fail_at[schema_id] = nil
         local function close()
             if _user_dbs[schema_id] and _user_dbs[schema_id]:loaded() then
-                collectgarbage()
                 _user_dbs[schema_id]:close()
             end
         end
         return _user_dbs[schema_id], close
     end
-    
-    -- 尝试重新打开或创建数据库（最多重试3次）
-    local max_retries = 3
+
+    -- 打开失败负缓存：短时间内直接降级，不再抢 LOCK / 不再全量 GC
+    local fail_ts = _db_fail_at[schema_id]
+    if fail_ts and (os.time() - fail_ts) < DB_RETRY_INTERVAL then
+        return nil, function() end
+    end
+
+    -- 尝试打开（最多 2 次：第 1 次清理残留未加载连接，第 2 次重开）
     local db = nil
-    
-    for i = 1, max_retries do
-        -- 如果之前的连接存在但未加载，先关闭
+    for _ = 1, 2 do
         if _user_dbs[schema_id] then
             pcall(function() _user_dbs[schema_id]:close() end)
             _user_dbs[schema_id] = nil
         end
-        
-        -- 创建新连接
+
         db = LevelDb(get_db_file_name(schema_id))
-        
         if db then
-            -- 尝试打开
-            local ok, err = pcall(function() db:open() end)
+            local ok = pcall(function() db:open() end)
             if ok and db:loaded() then
                 _user_dbs[schema_id] = db
+                _db_fail_at[schema_id] = nil
                 break
             end
         end
-        
-        -- 重试前稍作等待
-        if i < max_retries then
-            collectgarbage()
-        end
     end
-    
+
+    -- 打开失败：记录负缓存时间戳，本次及短时间内的后续调用一律降级
+    if not db or not db:loaded() then
+        _db_fail_at[schema_id] = os.time()
+        return nil, function() end
+    end
+
     local function close()
         if _user_dbs[schema_id] and _user_dbs[schema_id]:loaded() then
-            collectgarbage()
             _user_dbs[schema_id]:close()
         end
     end

@@ -181,7 +181,17 @@ end
 
 ---@param config Config
 function tips.init(config)
-    if tips.status ~= "pending" then return end
+    -- ★ 只读优先 + 状态机：正常情况（版本/哈希/禁用项均未变）全程只读、
+    --   不抢写锁，从源头消除「双引擎实例同时以写模式打开 lua/tips」导致的
+    --   LOCK 冲突（B-06）。只有确实需要重建时才切写模式，写模式打不开则
+    --   降级只读继续用旧数据，绝不 panic。
+    --
+    --   tips.status 状态机：pending → initialing → done。
+    --   置 done 后，同一进程内后续引擎重建（切方案）不再重复 init，也就
+    --   不再重复抢写锁；代价是用户手动改了 tips_user.txt 后需重启 App 才会
+    --   触发重建（进程重启后 module 重载、status 回到 pending）。
+    if tips.status == "done" and tips_db:loaded() then return end
+    tips.status = "initialing"
 
     local dist = rime_api.get_distribution_code_name() or ""
     local user_lua_dir = rime_api.get_user_data_dir() .. "/lua"
@@ -201,12 +211,14 @@ function tips.init(config)
         end
     end
 
-    -- 检查是否需要重建数据库
-    tips_db:open()
-    local needs_rebuild = false
+    -- 先用只读模式读元数据，判断是否需要重建
+    local read_ok = pcall(function() tips_db:open_read_only() end)
+    local needs_rebuild = (not read_ok) or (not tips_db:loaded())
 
     -- 检查 1: super_tips 版本号
-    if tips_db:meta_fetch(META_KEY.version) ~= SUPER_TIPS_VERSION then
+    if not needs_rebuild
+        and tips_db:meta_fetch(META_KEY.version) ~= SUPER_TIPS_VERSION
+    then
         needs_rebuild = true
     end
 
@@ -232,21 +244,29 @@ function tips.init(config)
         needs_rebuild = true
     end
 
-    -- 如果需要，则执行重建
+    -- 需要重建时才切写模式
     if needs_rebuild then
-        tips_db:empty()
-        tips.init_db_from_file(tips.preset_file_path)
-        tips.init_db_from_file(tips.user_override_path)
+        if tips_db:loaded() then
+            pcall(function() tips_db:close() end)
+        end
+        local opened = pcall(function() tips_db:open() end)
+        if opened and tips_db:loaded() then
+            tips_db:empty()
+            tips.init_db_from_file(tips.preset_file_path)
+            tips.init_db_from_file(tips.user_override_path)
 
-        -- 重建成功后，再更新所有元数据，确保操作的原子性
-        tips_db:meta_update(META_KEY.version, SUPER_TIPS_VERSION)
-        tips_db:meta_update(META_KEY.user_file_hash, user_file_hash)
-        tips_db:meta_update(META_KEY.disabled_types, disabled_types_str)
+            -- 重建成功后，再更新所有元数据，确保操作的原子性
+            tips_db:meta_update(META_KEY.version, SUPER_TIPS_VERSION)
+            tips_db:meta_update(META_KEY.user_file_hash, user_file_hash)
+            tips_db:meta_update(META_KEY.disabled_types, disabled_types_str)
+
+            pcall(function() tips_db:close() end)
+        end
+        -- 无论写重建是否成功，最后都回到只读态（写模式抢不到锁时降级用旧数据）
+        pcall(function() tips_db:open_read_only() end)
     end
 
-    -- 关闭并以只读模式重新打开
-    tips_db:close()
-    tips_db:open_read_only()
+    tips.status = "done"
 end
 
 ---从数据库中查询 tips

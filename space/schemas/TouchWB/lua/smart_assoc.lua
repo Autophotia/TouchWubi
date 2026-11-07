@@ -218,6 +218,11 @@ end
 -- -------------------------------------------------------------------
 local _dbs = {}
 
+-- ★ 打开失败负缓存：失败后短时间内直接降级（联想本次不生效），
+--   不再每次 tick 反复抢 LOCK —— 消除「双引擎实例抢写锁」的卡顿放大。
+local _db_fail_at = {}
+local DB_RETRY_INTERVAL = 5 -- 秒
+
 local function db_name(schema_id)
     return "lua/assoc_" .. tostring(schema_id)
 end
@@ -225,11 +230,23 @@ end
 local function get_db(schema_id)
     if not schema_id then return nil end
     local db = _dbs[schema_id]
-    if db and db:loaded() then return db end
+    if db and db:loaded() then
+        _db_fail_at[schema_id] = nil
+        return db
+    end
+    -- 打开失败负缓存：短时间内直接降级，不反复抢锁
+    local fail_ts = _db_fail_at[schema_id]
+    if fail_ts and (os.time() - fail_ts) < DB_RETRY_INTERVAL then
+        return nil
+    end
     db = LevelDb(db_name(schema_id))
     if not db then return nil end
     local ok = pcall(function() db:open() end)
-    if not ok or not db:loaded() then return nil end
+    if not ok or not db:loaded() then
+        _db_fail_at[schema_id] = os.time()
+        return nil
+    end
+    _db_fail_at[schema_id] = nil
     _dbs[schema_id] = db
     return db
 end
@@ -238,6 +255,7 @@ local function db_close(schema_id)
     local db = _dbs[schema_id]
     if db and db:loaded() then pcall(function() db:close() end) end
     _dbs[schema_id] = nil
+    _db_fail_at[schema_id] = nil
 end
 
 -- -------------------------------------------------------------------
