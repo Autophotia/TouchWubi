@@ -1,6 +1,6 @@
 ﻿# TouchWB 五笔输入法方案功能说明
 
-> 版本：v2.21
+> 版本：v2.22
 > 原作者：空山明白、Shawx
 > 维护者：Autophotia（流萤）
 > 项目主页：https://github.com/Autophotia/TouchWubi
@@ -15,13 +15,16 @@
 
 ### 2026-11-08
 
-**切「拇指双混」键盘收起再弹出：结案 = 陈旧的 build 编译缓存（非 App、非方案源码）**
+**⚠ 更正：本日早间至中午关于「切方案冷重启」的全部旧结论已作废，勿再引用**
 
-- **症状**：切到 `ly_wubi_pinyin_14`（含重复点击当前方案）时键盘必定收起再弹出；另外三个方案、以及 App 内置的 14 键 / 14 键混输方案反复切换都平滑。日志显示这是**键盘服务进程 native 崩溃后全新 PID 冷启动**（无 `reload begin/success`、无 `terminate`），不是普通的进程内软重载。
-- **根因**：手机端读到了 **PC 旧版 librime 编译的 build 产物**（`schemas/TouchWB/build/*.schema.yaml`、`*.prism.bin`，本地时间戳停在 11-04；顶层 `space/build/space.yaml` 停在 10-30）。清掉 build、由 App 的新 librime 现场重编译后故障彻底消失。重编译结果与原文件一致（`ly_pinyin_14.prism.bin` 的 double array 仍是 3072）⇒ 不是棱镜内容损坏，而是**整份 build 缓存/索引陈旧**；热切换（旧引擎未销毁时合并 build 产物）才踩到，冷启动走完整初始化不踩，所以只有拇指双混这条「同时加载 14 键别名拼音棱镜 + 双混主棱镜」的路径触发。
-- **验证**：清理后同一键盘进程内切拇指双混 9 次（含连续 4 次重复点击）⇒ **0 次进程重启 / 9 次进程内软重载**（86~117ms）；四方案共 18 次切换全正常，全日志冷启动只剩清理前那 1 次。
-- **★ 部署铁律**：`tools/pack-release.sh` 本来就排除全部 build 产物（只生成 113 字节的裁剪版 `build/default.yaml`），git 也不跟踪 build ⇒ **S 发布包是干净的**。问题只出在把开发 / 共享目录 `dev/space` 直接挂给手机用。以后真机部署：① 只用 S 包；或 ② 部署前删掉 `space/schemas/TouchWB/build/` 与 `space/build/space.yaml`，让 App 自己编译。**改过 schema 后尤其必须清**。
-- **给输入法作者的反馈**：「切方案导致键盘崩溃」一条**撤销**（是我们自己带了旧 build）；仅保留两条低优先级建议：App 对陈旧 / 异常 build 产物缺少容错（不该让键盘进程整崩）、引擎双实例抢 `lua/*.userdb` 写锁。
+- **已推翻的归因（按时间顺序，全部由真机单变量诊断证伪）**：① App 锁键盘 reload / 方案绑定 `ly_wubi_pinyin_14`；② 陈旧 build 编译缓存（「删 build 后好了」只是巧合）；③ 调序脚本 `super_sequence` 的 `F.fini` / double-close / 懒加载 / `sequence_*.userdb` 生命周期（A 档 `SEQ_DISABLE_DB=true` 仍冷、B 档整条调序按键路径全关后规律不变）。用户最初「生成 `sequence_*.userdb` ⟺ 冷重启」是**相关不是因果** —— 调序恰好等于一次上屏。
+- **唯一可靠判据（9 轮真机单变量诊断，2026-11-08 定案）**：**上屏后 `T.func` 有没有往 predictor 空段 yield 至少一个候选** —— yield 过 ⇒ 点方案走进程内软重载；一个都没 yield ⇒ 走 `initial-setup` 冷启动（键盘收起再弹出）。与候选栏看不看得见无关（`prediction` 只决定联想段填词库还是官方预测，不是 predictor 总闸），与主题 / 布局 / 双混内容 / 是否重复点击 / 调序 db 均无关。日志残片不足以反推 native 机制，本轮起不以日志推断作为因果依据。
+- **诊断链（每档只关一个变量，均只覆盖单个 lua + 重启 App）**：A `SEQ_DISABLE_DB` 仍冷 ⇒ db 出局；B 短路 `super_sequence*P` 调序按键路径（pin / refresh / 重排 / 落盘全关）规律不变 ⇒ 调序模块整条链路出局，C 免测；E 补齐无数据分支的全部状态标志仍冷 ⇒ 状态标志不是判据；F 强制真实候选表 `{"的"}` ⇒ **变软**；H 强制 `list=nil` 反向对照，「修改」仍软 ⇒ 暴露第二条 yield 源：`T.func` 的 S84 快照补算（`_last_ctx` 里查得到接续词照样 yield），并非否定判据；I 把占位改成**空文本** ⇒ **「修改」「调序」及反复点击全部软重启**。
+- **本轮修复（v2.22，S144）**：`lua/smart_assoc.lua` 的 `settle_commit` 在 `build_candidates` 返回空时不再 `reset_chain()` 直接早退，而是补一张 `{""}` 占位候选表 ⇒ `T.func` 仍会 yield 一次（`Candidate("predict", …, "", "")`），空段因此「有候选」。不塞假词、无可见文字；空白项即便被选中，`settle_commit` 在 `text==""` 分支直接返回，不写学习库、不污染联想链；空格键由 `P.func` 自己 `commit(" ")` 并吞掉，不会误选。
+- **已知边界**：① native 侧「为什么空段零候选就走 initial-setup」仍不明，属 App / librime 行为，不写死成因；② 此类词之后 `core.state.assoc_seg` 会按「联想段」置真，标点模块据此豁免（E 档真机未见异常）；③ **候选栏无视觉副作用（真机已确认）**：无联想词上屏后前端仍显示工具栏 / 各种 menu 图标，不出现空白项 —— 空文本候选在**展示层被跳过**、在**引擎层仍被计入候选**，故既保住工具栏、又让下次 reload 走软；这也再次印证判据在「引擎层是否 yield 过」，与前端是否显示完全解耦；④ 非中文 / 标点 / 命令上屏不走 predictor 空段，不在本判据范围内。
+- **S143 的去留**：`super_sequence.lua` 的 `F.fini` 不触碰 C++ UserDb、懒加载等改动**保留**（防御性，虽非本故障根因）；`SEQ_DISABLE_DB` 常量保留为证伪开关，默认 `false`。S142 包与 git `dc6b240` 是**历史快照**（内里的 11-08 旧结论已作废），其错误已由本版文档统一更正；git 历史与已发布 zip 保留原样、不再引用，项目库 `/01-资料/` 的对应文档已同步更新。
+- **部署前清 build**：降级为通用卫生建议（`pack-release.sh` 本就排除全部 build，S 包干净），**不再作为本故障的成因**。真机部署用 S 包即可；若把开发目录 `dev/space` 直挂手机，删掉 `space/schemas/TouchWB/build/` 与 `space/build/space.yaml` 让 App 重编译是好习惯。
+- **给输入法作者的反馈**：可保留的低优先级建议仅「引擎双实例抢 `lua/*.userdb` 写锁」一条；「切方案崩溃」属本方案 predictor 空段状态，已在脚本侧修复，暂不需反馈。
 
 ### 2026-11-07
 
@@ -1625,10 +1628,12 @@ lua_reverse_db:
 **不要打包的东西**：`*.bak*`（各轮备份）、`*.userdb/`（用户词典）、`lua/sequence_*`（调序数据）、
 `lua/input_stats_ly_*.lua`（运行时统计）、`*/build/`（部署编译缓存，部署时会自动重建）。
 
-> ⚠ **部署前必须清 build（2026-11-08 实证）**：「不打包 build」≠「手机上没有旧 build」。
-> 若把开发目录 `dev/space` 直接挂给手机，里面 PC 旧 librime 编译的 `schemas/TouchWB/build/*`
-> 会被 App 直接读取，热切换到「拇指双混」时会让键盘服务进程崩溃并冷启动（键盘收起再弹出）。
-> 真机部署前删 `space/schemas/TouchWB/build/` 与 `space/build/space.yaml`，或只用 S 发布包。
+> ⚠ **部署前清 build（通用卫生建议，非故障成因）**：「不打包 build」≠「手机上没有旧 build」。
+> `pack-release.sh` 已排除全部 build 产物，S 发布包是干净的；若把开发目录 `dev/space` 直接挂给手机，
+> 建议删 `space/schemas/TouchWB/build/` 与 `space/build/space.yaml` 让 App 现场重编译。
+> **2026-11-08 更正**：早间曾把「切方案键盘冷重启」归因于此、后又归因于调序库生命周期，
+> 两条结论都已被真机单变量诊断推翻。真正判据是上屏后 predictor 空段有没有候选
+> （见 2026-11-08 更新日志）。清 build 不再视为该故障的解法。
 
 > ⚠ **`.custom.yaml` 是用户级补丁，不随方案包分发**：Rime 部署时才会把它的 `patch:` 合并到同名
 > schema，别人拿到方案包时它不存在。因此任何想「所有人都生效」的配置都必须写进 `*.schema.yaml`

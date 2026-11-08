@@ -1795,6 +1795,24 @@ settle_commit = function(ctx, sid, text, from_predict)     -- ★ 上面有前�
     end
 
     local list, only_hist = build_candidates(sid)
+    -- ★★ S144 修复（2026-11-08，真机 9 轮单变量诊断定案）：
+    --   上屏后 predictor 建的**空段必须至少有一个候选**，否则下次点方案时
+    --   App/引擎会走 initial-setup 冷启动（键盘收起再弹出）；有候选则走
+    --   进程内软重载。判据在 T.func 是否 yield 过，不在候选栏看不看得见。
+    --
+    --   「调序」这类词在联想库里查不到接续、固定词库也没有 ⇒ 旧逻辑在这里
+    --   reset_chain() 后直接早退，pending_cands 为 nil ⇒ T.func 一个候选都不吐
+    --   ⇒ 冷启动。此前误归因「调序脚本 / sequence_*.userdb」：调序只是恰好
+    --   等于一次上屏，与该 db 的打开/关闭/导出/懒加载均无关（A 档证伪）。
+    --
+    --   这里补一个**空文本**占位候选：不塞假词、不生成可见文字，T.func 照样
+    --   yield 一次，空段因此「有候选」。真机 I 档（B 档 super_sequence 不动）
+    --   实测「修改」「调序」及反复点击**全部软重启**。
+    --   即便空白项被选中，settle_commit 在 text=="" 分支直接 reset_chain 返回，
+    --   不写学习库、不污染联想链；空格键由 P.func 自己 commit(" ") 并吞掉，
+    --   不会误选它（见 S73/S76）。副作用仅：此类词之后 core.state.assoc_seg
+    --   会按「联想段」置真（与 E 档同，真机未见标点异常）。
+    if not list or #list == 0 then list, only_hist = { "" }, {} end
     if not list then
         dbg("[settle] build_candidates=nil -> 断链")
         reset_chain()

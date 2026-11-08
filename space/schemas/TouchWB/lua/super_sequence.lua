@@ -150,6 +150,19 @@ local _need_export = {}
 local current_schema_id = nil
 -- 按方案存储的清空标记（清空后阻止自动导入）
 local _cleared_schemas = {}
+-- 按方案存储的「已导入」标记（懒加载：首次真正读写调序数据时才从 txt 备份导入）
+local _imported = {}
+-- 前置声明（定义在 import_from_file 之后，见下）
+local ensure_imported
+
+-- ★★★ 2026-11-08 诊断开关（一击证伪，正常发布务必保持 false）★★★
+--   置 true ⇒ 本模块彻底不打开任何 sequence_*.userdb（不 open / query / close），
+--   调序退化为「本次进程内不落盘」。用途：
+--     若置 true 后切方案【仍】冷重启 ⇒ 崩溃与 sequence db 生命周期完全无关，
+--     整条 db 假设被一击证伪，应转查 super_sequence 的 refresh_notifier 等其它路径；
+--     若置 true 后不崩、置 false 才崩 ⇒ 根因钉死在 db 生命周期。
+--   改这一个常量后只覆盖本 lua 即可，无需重新打包整个方案。
+local SEQ_DISABLE_DB = false
 
 -- 按方案存储的数据库连接
 local _user_dbs = {}
@@ -174,14 +187,20 @@ local function get_export_file_name(schema_id)
 end
 
 local function get_user_db(schema_id)
+    -- ★ 诊断开关：彻底不碰 C++ UserDb（见文件头 SEQ_DISABLE_DB 注释）
+    if SEQ_DISABLE_DB then return nil, function() end end
     if not schema_id then return nil, function() end end
 
     -- 如果数据库连接已存在且正常，直接返回
     if _user_dbs[schema_id] and _user_dbs[schema_id]:loaded() then
         _db_fail_at[schema_id] = nil
         local function close()
-            if _user_dbs[schema_id] and _user_dbs[schema_id]:loaded() then
-                _user_dbs[schema_id]:close()
+            if _user_dbs[schema_id] then
+                if _user_dbs[schema_id]:loaded() then
+                    _user_dbs[schema_id]:close()
+                end
+                _user_dbs[schema_id] = nil
+                _db_fail_at[schema_id] = nil
             end
         end
         return _user_dbs[schema_id], close
@@ -219,8 +238,12 @@ local function get_user_db(schema_id)
     end
 
     local function close()
-        if _user_dbs[schema_id] and _user_dbs[schema_id]:loaded() then
-            _user_dbs[schema_id]:close()
+        if _user_dbs[schema_id] then
+            if _user_dbs[schema_id]:loaded() then
+                _user_dbs[schema_id]:close()
+            end
+            _user_dbs[schema_id] = nil
+            _db_fail_at[schema_id] = nil
         end
     end
 
@@ -247,6 +270,8 @@ local function get_adjustment(code, schema_id)
 
     local db = get_user_db(schema_id)
     if not db then return nil end
+
+    ensure_imported(schema_id, db)
 
     local accessor = db:query(code .. "|")
     if accessor == nil then return nil end
@@ -295,7 +320,9 @@ local function save_adjustment(code, adjust_key, to_position, timestamp, schema_
 
     local db = get_user_db(schema_id)
     if not db then return end
-    
+
+    ensure_imported(schema_id, db)
+
     local key = string.format("%s|%s", code, adjust_key)
     local result = false
 
@@ -526,6 +553,16 @@ local function import_from_file(db, schema_id)
 
     _need_export[schema_id] = true  -- 导入后标记需要导出
     return true, import_count
+end
+
+-- 懒导入：首次真正读写调序数据时，才打开 db 并从 txt 备份导入。
+-- 避免 app 主进程（不处理输入）在 P.init 里无谓 open+import 抢锁。
+ensure_imported = function(schema_id, db)
+    if not schema_id or _imported[schema_id] then return end
+    _imported[schema_id] = true
+    if db and db:loaded() then
+        import_from_file(db, schema_id)
+    end
 end
 
 --- 清空数据库
@@ -1193,9 +1230,11 @@ end
 
 local P = {}
 function P.init(env)
-    local schema_id = env and env.engine and env.engine.schema and env.engine.schema.schema_id
-    local db = get_user_db(schema_id)
-    import_from_file(db, schema_id)
+    -- ★ 懒加载：不在此打开 sequence.userdb，也不在此 import。
+    --   app 主进程与 keyboard 键盘进程都会加载本方案并走 P.init；
+    --   若在这里无条件 open + import，两进程会双实例抢同一个 leveldb 的 LOCK，
+    --   调序写入后状态交叠，切方案 close 时 native 崩溃（键盘进程整崩、冷重启）。
+    --   改为首次真正读写调序数据时（ensure_imported）再打开并导入。
     -- ★ S93：探针初始化（只做一次；纯追加写，不改任何输入行为）
     af_probe_init(env)
 end
@@ -1316,16 +1355,29 @@ local F = {}
 function F.init() end
 
 function F.fini()
-    local schema_id = current_schema_id
-    
-    if _need_export[schema_id] then
-        local db = get_user_db(schema_id)
-        export_to_file(db, schema_id)
+    -- ★★★ 2026-11-08：切方案冷重启根因修复 —— 引擎销毁期绝不触碰 C++ UserDb。
+    --   F.fini 由 librime 在「销毁旧引擎（engine disposed）」时回调，此刻 C++ 层
+    --   正在 close 它登记的全部 UserDb（日志里 closed db 'lua/sequence_*' 就在这时）。
+    --   旧实现却在回调里做三件致命的事：
+    --     ① _need_export[sid] 为真时 get_user_db() —— 若句柄已被收走会新建 LevelDb 并 open()；
+    --     ② export_to_file() —— 对 db:query("") 全表迭代 + io.open 写 txt；
+    --     ③ close_db() —— 再对同一 C++ 对象 close() 一次。
+    --   对「正在销毁」的 C++ 对象 open/query/close ⇒ use-after-free ⇒ 键盘服务进程整崩、冷启动。
+    --   而 _need_export[sid] 只在调序写入（save_adjustment/import，同时生成 sequence_*.userdb）
+    --   后置真 ⇒ 精确对应实测判据：没调序过的方案软重载正常，调序过的必冷重启。
+    --   对照 smart_assoc 的 P.fini 只做 db_close()（不重新 open/query）故从不崩，可反证。
+    --   修复：F.fini 只清纯 Lua 状态；db 的 close / open 全交给引擎层与按键期按需处理。
+    --   txt 导出不依赖 fini：S.func 的 should_auto_export（次日首次打字）与 /txdc 手动导出
+    --   都在引擎存活期执行，功能不丢。
+    -- ★ 注意：这里必须清掉 _user_dbs 的引用（纯 Lua 表赋值，不调用任何 C++ 方法），
+    --   否则下次按键 get_user_db 会对可能已被引擎收走的句柄调 :loaded()。
+    --   _need_export / _imported 刻意保留：前者让 should_auto_export 在下次打字时补做导出，
+    --   后者避免切方案后无谓重复导入 txt 备份（调序数据本就在 userdb 里，磁盘持久）。
+    local sid = current_schema_id
+    if sid then
+        _user_dbs[sid] = nil
+        _db_fail_at[sid] = nil
     end
-    
-    local _, close_db = get_user_db(schema_id)
-    close_db()
-    
     cur_adjustment_phrase = nil
     cur_highlight_idx = nil
     cur_adjust_offset = 0
