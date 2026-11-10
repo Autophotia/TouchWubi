@@ -185,7 +185,8 @@ engine:
     - lua_filter@*smart_assoc*F         # 智能联想：/lxqk 清空 /lxzt 状态（放 S+F 之后）
     - lua_filter@*user_coined_cmd*F       # 自造词管理：/zcscN 删除 /zccx 撤销 /zcqk 清空
     - lua_filter@*drop_sentence            # 丢弃整句切分候选（sentence），根除 tane→和世有 等乱词
-    - lua_filter@*wubi_pinyin_filter       # 重码筛选（第五码拼音首字母筛选），放在S+F之后，在已排序候选基础上筛选
+    # （已移除 lua_filter@*wubi_pinyin_filter：26键五笔重码少，不再做第5码拼音首字母筛选；
+    #   并按正常26键五笔逻辑移除 wubi_prefix 第5码装置，26键完全不使用五码筛选机制）
     # 简化器：执行通用简化和过滤操作
     - simplifier
     # Emoji转换过滤器：将文本转换为Emoji表情
@@ -228,8 +229,6 @@ engine:
     - table_translator@fixed
     # 临时自造词翻译器
     - table_translator@mkst
-    # 码表翻译器为wubi_pinyin_filter实现重码筛选提供支持（第五码拼音首字母筛选）
-    - script_translator@wubi_prefix        # 为 wubi_pinyin_filter 提供第 5 码筛选支持（见文末 wubi_prefix 段说明）
     # 反查翻译器：支持拼音反查五笔编码
     - reverse_lookup_translator
     # Lua翻译器：计算器翻译器（处理 = 开头的数学表达式）
@@ -246,12 +245,17 @@ speller:
   initials: zyxwvutsrqponmlkjihgfedcba`/@=
   # 分隔符：仅反引号，用于自造词引导
   delimiter: "`"
-  # 最大编码长度（自造词或者混输模式需要较长的编码）
-  max_code_length: 5                       # 5码拼音筛选特设
-  auto_clear: max_length                   # 6码顶字上屏
-  auto_select: false                       # 自动上屏开关
-  auto_select_pattern: ^;.$|^\w{4}$        # 分号或4码自动上屏（仅上一句为true时生效）
-  enable_completion: true                  # 启用编码补全：重码筛选时显示4码前缀匹配的候选
+  # 最大编码长度：标准五笔最长 4 码；26键按正常五笔逻辑，不使用第5码拼音筛选机制
+  max_code_length: 4                       # 标准4码；第5码为下一字首码，由 AutoSelectAtMaxCodeLength 顶首上屏
+  # 空码处理：4 码无候选时，AutoClear 在下一次按键前清空整串，随后 PushInput 把该键作为新段首码
+  #   （微软五笔式）；顶首后 z 引导拼音反查不受影响，已由真机 A/B 复测确认。
+  auto_clear: max_length                   # 4码空码截断；14键自带同名显式覆盖，互不穿透
+  auto_select: true                        # 唯一候选自动上屏的总开关（librime 只读这一项）
+  auto_select_pattern: '^[a-y][a-z]{3}$'  # 仅4码唯一自动上屏；2/3码不匹配 ⇒ 保留补全；首字母排除 z（拼音反查引导）
+  auto_select_unique_candidate: true       # App 侧兼容项；标准 librime 不读取此 key，勿单独依赖
+  enable_completion: true                  # 启用编码补全：显示前缀匹配的候选
+  # 说明：分号「;」已在 symbols.yaml 映射为标点（commit: ；），全角标点顶首由 punct 链路负责，
+  #   故不新增分号专用 pattern；第5码拼音筛选机制已完全移除，按正常五笔逻辑。
   # 拼写代数规则：定义输入转换规则
   algebra:
     # 规则1：删除匹配 "xx" 的输入（用于特殊触发）
@@ -283,70 +287,6 @@ translator:
   max_phrase_length: 4
   # 是否启用联想（true=启用，支持前缀匹配，输入3码时显示4码候选）
   enable_completion: true
-  # 候选词旁边“注释”（comment）部分显示样式配置
-  comment_format:
-    # 删除注释中的波浪号 ~
-    - xform/~//
-    # 将注释中的半角英文字母（a-z）全部转换为全角字母（ａ-ｚ）
-    - 'xlit|abcdefghijklmnopqrstuvwxyz|ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ|'
-
-# 拼音反查配置（z 键引导：输入 z+拼音，显示对应五笔编码）
-
-# ================================================================
-# 第五码筛选支持组件（script_translator@wubi_prefix）
-# ----------------------------------------------------------------
-# ⚠ 它不是拼音翻译器：读的是五笔字典 wubi.extended + 本方案的五笔棱镜，
-#   全程没有任何拼音参与。
-#
-# 为什么需要它（实测，详见 14键双键拼音候选缺失-排查报告.md）：
-#   五笔码表最长 4 码。输入到第 5 码时，主 table_translator 既查不到精确码，
-#   也查不到补全（补全的方向是「输入是编码的前缀」，而没有任何 5 字母编码
-#   以 taned 开头）⇒ 一条候选都不出。
-#   本组件靠 script_translator 的音节图切分，产出「只吃掉前 1~4 码」的 partial-span
-#   候选（type=phrase，start=0、end=1~4）；wubi_pinyin_filter 靠这个 _end 判断
-#   「第 5 码筛掉了哪些 4 码命中」（taned→物极必反、khlgg→中国/跨国/贵国）。
-#
-# ★ 2026-11-02 由 table_translator 回退到 script_translator：
-#   2026-11-01 曾改为 table_translator(enable_sentence:true) 以脱离 script_translator，
-#   但实测（sandbox_z_fffff_verify.py）暴露两个无法接受的失效：
-#   · 第五码 z 失效（26键+14键）：table_translator 的 MakeSentence 把整串（含 z）当五笔
-#     编码建图，z 不是字根 ⇒ CommonPrefixSearch("z") 空 ⇒ 整体返回空（tanez total=0）；
-#     script_translator 的音节图对任意字母（含 z 声母）都能切，故 z 正常。
-#   · 14键 fffff 失效：短码命中（封=fff）被 filter 的 #candidate_code<need(4) 误杀
-#     （此点已在 wubi_pinyin_filter.lua 单独修复，与 translator 类型无关）。
-#   音节切分带来的乱词已由 lua/drop_sentence.lua（丢弃 type=sentence 整句候选）根除，
-#   故 script_translator 的副作用可控。乱词根除与 translator 类型无关，drop_sentence 必须保留。
-#
-# ⚠ 不要删。删掉之后：
-#   · 5 码筛选整体失效：taned 出「坦然地」、tanef/taneg/khlgg/khlgz/
-#     wqvbh/wqvbn/fffff/nnnnn 全部变空。
-#
-# enable_completion: false 是刻意的（本组件也用不到补全）。
-# ================================================================
-wubi_prefix:
-  # 使用的字典文件名
-  dictionary: wubi.extended
-  # 数据库类型：使用表格数据库
-  db_class: tabledb
-  # 初始质量值：候选项的优先级权重（1000为最高优先级）
-  initial_quality: 500
-  # 对特定模式禁用用户词典：匹配以z开头的所有编码不记录到用户词典
-  disable_user_dict_for_patterns:
-    - "^z.*$"
-  # 是否启用字符集过滤器（false=不启用，支持GBK扩展字符）
-  enable_charset_filter: false
-  # 是否启用整句输入（false：script_translator 用音节图切分产 partial-span，不依赖 enable_sentence）
-  enable_sentence: false
-  # 是否启用用户词典（false=不启用，不记录用户输入）
-  enable_user_dict: false
-  # 是否启用编码器（false=不启用，不自动生成词组）
-  enable_encoder: false
-  # 是否编码提交历史（false=不启用，不学习用户习惯）
-  encode_commit_history: false
-  # 最大词组长度：最多支持4个字的词组
-  max_phrase_length: 4
-  # 是否启用联想（true=启用，支持前缀匹配，输入3码时显示4码候选）
-  enable_completion: false               # 本组件不需要补全：704 变体验证与 true 逐字一致
   # 候选词旁边“注释”（comment）部分显示样式配置
   comment_format:
     # 删除注释中的波浪号 ~
@@ -459,12 +399,8 @@ mkst:
 style:
   # 内联编辑：false（不使用内联编辑，显示在独立区域）
   inline_preedit: false
-wubi_pinyin_filter:            # 该段显式配置优先级高于脚本检测
-  use_key_pairs: false         # 按键对扩展：true = 14键模糊，false = 26键精确
-  use_last_char: true          # 首末字筛选：true = 末字筛选，false = 首字筛选
-  predict_cap_1: 3           # 1 码：一级简码之外最多带几条「前缀预测」
-  predict_cap_2: 6           # 2 码：二级简码之外最多带几条（0 = 完全不预测）
-  predict_cap_3: 5           # 3 码：三级简码之外最多带几条
+# （26键五笔已移除 wubi_pinyin_filter 配置段与 wubi_prefix 组件：完全不使用第5码拼音筛选机制，
+#   按正常五笔逻辑，4码唯一即上屏，重码时继续输入下一字自然顶首）
 
 # ================================================================
 # predictor 本体（★ S100：从 .custom.yaml 固化进主方案）

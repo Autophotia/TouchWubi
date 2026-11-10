@@ -189,6 +189,9 @@ speller/+:
   auto_clear: max_length                   # 6码顶字上屏
   auto_select: false                       # 自动上屏开关
   auto_select_pattern: ^;.$                # 分号自动上屏（仅上一句为true时生效）
+  # 显式=false：14键保持原始行为，不自动上屏唯一候选；
+  # 否则会因 speller/+: 合并继承26键新增的 auto_select_unique_candidate:true 而改变上屏逻辑。
+  auto_select_unique_candidate: false
   enable_completion: true                  # 启用编码补全：重码筛选时显示4码前缀匹配的候选
   # 拼写代数规则：定义输入转换规则
   algebra/+:                               # algebra: 音节/编码变换规则列表,使用 /+/ 表示"追加到原列表末尾"
@@ -246,7 +249,24 @@ translator:
 # ================================================================
 wubi_prefix:
   prism: *schema                            # ★ 14键专用棱镜，不能沿用主方案的
-  enable_completion: false                  # 与主方案一致，显式写出以自解释
+  # 以下字段原靠「__include ly_wubi.schema 合并继承」获得；
+  # 现 26键方案已移除其 wubi_prefix 段（26键回归标准五笔，不再需要第5码装置），
+  # 为避免 14键的5码筛选因继承链断裂而失效，此处显式补全完整定义，使 14键自包含。
+  dictionary: wubi.extended                 # 使用的字典文件名
+  db_class: tabledb                         # 数据库类型：使用表格数据库
+  initial_quality: 500                      # 候选项优先级权重（1000为最高）
+  disable_user_dict_for_patterns:
+    - "^z.*$"                               # 禁用 z 开头编码记入用户词典
+  enable_charset_filter: false              # 不启用字符集过滤器（支持GBK扩展）
+  enable_sentence: false                    # 不依赖 enable_sentence 的音节图切分
+  enable_user_dict: false                   # 不启用用户词典
+  enable_encoder: false                     # 不自动生成词组
+  encode_commit_history: false              # 不学习用户习惯
+  max_phrase_length: 4                      # 最多4字词组
+  enable_completion: false                  # 本组件不需要补全（与26键一致）
+  comment_format:                           # 候选注释显示样式
+    - xform/~//                             # 删除注释中的波浪号 ~
+    - 'xlit|abcdefghijklmnopqrstuvwxyz|ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ|'  # 注释字母转全角
 
 # 用户词典翻译器（自动学习用户词组，即时生效）
 fixed:

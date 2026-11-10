@@ -1,6 +1,7 @@
 # TouchWB / 流萤 · 项目基线（BASELINE）
 
 > **基线版本**：v2.19（README 口径 2026-11-04）
+> **当前版本**：v2.23 / 2026-11-10（S145；README 头部、`dev/docs/更新日志.md`、本文件第七节三处同步）
 > **基线日期**：2026-11-04（重定义基线，作为「模块化重构 + 类型定义库 + 纯内存状态表」新项目的起点）
 > **基线范围**：`D:\AutophotiaIME\dev\space\schemas\TouchWB` 方案本体，82 个文件（不含 build 编译产物，2026-11-04 实测）
 > **用途**：后续所有功能拓展、优化、Bug 修复均以此文件为对照基准；每次变更在此追加「变更记录」，保证任何时候都能回答"当前版本和基线差了什么"。
@@ -14,7 +15,7 @@
 | 项目 | TouchWB 五笔输入法方案（Rime 内核） |
 | 上游 | 空山明月底包 → Shawx（TouchWubi）→ **Autophotia（流萤）**当前维护 |
 | 仓库 | https://github.com/Autophotia/TouchWubi |
-| README 版本 / 日期 | v2.19 / 2026-11-04 |
+| 当前版本 / 日期 | v2.23 / 2026-11-10（基线值 v2.19 / 2026-11-04）；历次更新记录见 `dev/docs/更新日志.md` |
 | info.yaml version | **"2.0" ⛔ 禁止修改**（输入法识别用；2026-10-25 事故：曾改 2.3 致导入后输入法不认，已回退）/ update_time 2026-10-31 |
 | 默认方案 | `ly_wubi_14`（拇指五笔 14 键，项目默认口径；space.custom.yaml 当前实测为 `ly_wubi`，见 B-12） |
 | 默认主题 | `14key_wubi`（移动端）/ PC 用系统主题 |
@@ -168,7 +169,7 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | B-10 | 代码 | 死代码：`input_stats_ly_wubi_14.lua`(994行) 与 `input_stats_ly_wubi_pinyin_14.lua`(461行) 及两个 `.bak` **无任何 schema 挂载**（统计实际走 `input_statistics.lua`） | 全库 grep | 确认可删，杜绝"改一处漏两处" |
 | B-11 | 流程 | 测试资产未随库分发：README 引用的 `本次修改-回归测试清单.md`、`tools/sandbox_s100_predictdb.py` 均不在本副本 | 全库查找 | 回归测试清单应作为受控文件纳入（建议 `dev/tests/`） |
 | B-12 | 版本 | ✅已解决：README v2.3 / 2026-10-24 与 BASELINE 一致；space.custom.yaml 当前 `schema_id=ly_wubi`/`26key_wubi` 为用户临时切换，非固定口径。**info.yaml version 保持 `"2.0"` 不参与同步**——见 B-14 | 文件比对 | 发版 checklist：README、space.custom.yaml、BASELINE 三处同步 |
-| B-14 | 版本 | ⛔ **`info.yaml` 的 `version: "2.0"` 禁止修改**（2026-10-25 事故）：该字段供输入法识别方案，10-24 误改为 2.3 导致方案导入输入法后不认，用户已手动回退 `"2.0"` | 用户反馈 + 文件实测 | 版本演进只记 README / BASELINE / space.custom.yaml；info.yaml 仅可改 `update_time` |
+| B-14 | 版本 | ⛔ **`info.yaml` 的 `version: "2.0"` 禁止修改**（2026-10-25 事故）：该字段供输入法识别方案，10-24 误改为 2.3 导致方案导入输入法后不认，用户已手动回退 `"2.0"` | 用户反馈 + 文件实测 | 版本演进只记 README 头部 / `dev/docs/更新日志.md` / BASELINE；`space.custom.yaml` 由 App 自动生成不参与；info.yaml 仅可改 `update_time` |
 | B-13 | 资产 | `14key_wubi/build/` 存在（含编译产物），`26key_wubi/` 无 build——两侧不一致；旧字体（新建文件夹 14 个 ttf）未纳入 fonts | 目录比对 | 明确 build 目录管理策略；字体确认是否还需要 |
 
 ---
@@ -187,7 +188,7 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
    - PC 端专属：`;` `'` 二选三选、Ctrl 调频、Emacs 键
 3. **部署三件事**：覆盖+重新部署 → 切一次方案 → 改过主题删 `themes/<t>/build/`。
 4. **新功能默认只动移动端**：主题层改动不影响 PC；改 schema/lua 必须同时评估两端。
-5. **发版同步**：README、space.custom.yaml、本基线，**三处**版本口径一致。⛔ **不含 `info.yaml` 的 `version`**（输入法识别用，固定 `"2.0"`，改则导入后不认，见 B-14）；info.yaml 只同步 `update_time`。
+5. **发版同步**：README 头部、`dev/docs/更新日志.md`、本基线，**三处**版本口径一致（`space.custom.yaml` 是 App 自动生成的用户配置，不参与；更新日志放 `dev/docs/`，不随 S 包分发）。⛔ **不含 `info.yaml` 的 `version`**（输入法识别用，固定 `"2.0"`，改则导入后不认，见 B-14）；info.yaml 只同步 `update_time`。
 6. **日志例行检查**：每次部署后看 `log/keyboard` 与 `log/app` 的 error，新错误须入台账。
 
 ---
@@ -248,6 +249,7 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | 2026-11-08 | **【已推翻 · 勿引用】切方案冷重启曾收敛到调序库生命周期（S143）**：① **用户实测判据（唯一可靠）**——没调序过的方案切换 = 进程内软重载；有过调序行为（生成 `sequence_*.userdb`）= 冷重启；四方案全调序过则四个全崩。与主题/布局/双混/重复点击无关，App 内置 14 键与 14 键混输方案反复切换正常 ⇒ 排除 App 通病。② **代码级定位**——`super_sequence.F.fini` 在「销毁旧引擎」回调里执行 `get_user_db()`（句柄被收走时会新建 LevelDb 并 `open()`）、`export_to_file()`（`db:query("")` 全表迭代 + 写 txt）、`close_db()`；对正在销毁的 C++ UserDb open/query/close ⇒ use-after-free ⇒ 键盘进程整崩。`_need_export[sid]` 仅在调序写入后置真 ⇒ 精确对应「调序过才崩」。对照 `smart_assoc.P.fini` 只 close 不重新 open/query，联想库常驻却不崩，可反证。③ **修复**——`F.fini` 只清纯 Lua 状态（含 `_user_dbs[sid]=nil`）、完全不碰 C++ db；`P.init` 改懒加载（`ensure_imported` 首次读写才开库+导入 txt），避免双实例抢锁；close 闭包 close 后置 nil。导出不丢：`should_auto_export` / `/txdc` 在引擎存活期执行。④ **一击证伪开关**——文件头 `SEQ_DISABLE_DB=true` 时彻底不打开任何 `sequence_*.userdb`；置 true 仍崩 ⇒ 整条 db 假设证伪转查其它路径，置 true 不崩、false 才崩 ⇒ 根因钉死在 db。改一个常量只覆盖本 lua 即可 | 调序库生命周期（纯 lua） | **★ 2026-11-08 晚间证伪**：A 档 `SEQ_DISABLE_DB=true` 仍冷、B 档整条调序按键路径全关后规律不变 ⇒ 调序 db 与调序脚本均非成因；本行仅作历史留痕，正确结论见下一行 |
 | 2026-11-08 | **切方案冷重启定案 + predictor 空段占位候选修复（v2.22，S144）**：① **9 轮真机单变量诊断定案判据** —— 上屏后 `T.func` 有没有往 predictor 空段 yield 至少一个候选：yield 过 ⇒ 进程内软重载；零 yield ⇒ `initial-setup` 冷启动。与候选栏是否可见、`prediction` 开关（只决定联想段填词库还是官方预测，与 `smart_assoc` 独立）、主题 / 布局 / 双混 / 重复点击 / `sequence_*.userdb` 均无关。② **全部旧归因作废**：App 锁键盘 reload / 方案绑定、陈旧 build 编译缓存、调序脚本 `F.fini` 与 db 生命周期（用户最初「生成 `sequence_*.userdb` ⟺ 冷重启」是相关不是因果，调序恰好等于一次上屏）；日志残片不再作为因果依据。③ **诊断链**：A `SEQ_DISABLE_DB` 仍冷 ⇒ db 出局；B 短路 `super_sequence*P` 调序路径后规律不变 ⇒ 调序模块整条链路出局（C 免测）；E 补齐无数据分支全部状态标志仍冷 ⇒ 状态标志不是判据；F 强制真实候选表 ⇒ **变软**；H 强制 `list=nil` 反向对照「修改」仍软 ⇒ 暴露第二条 yield 源 `T.func` S84 快照补算，并非否定判据；I 占位改空文本 ⇒ **全软**。④ **修复**：`lua/smart_assoc.lua` 的 `settle_commit` 在 `build_candidates` 返回空时补 `{""}` 占位候选表（不再 `reset_chain` 早退），`T.func` 因此仍 yield 一次 `Candidate("predict", ..., "", "")`；不塞假词、无可见文字，空白项被选中时 `settle_commit` 在 `text==""` 分支直接返回不写学习库，空格由 `P.func` 自己 `commit(" ")` 吞掉不会误选。⑤ **保留** S143 的 `F.fini` 不触碰 C++ UserDb / 懒加载等防御性改动，`SEQ_DISABLE_DB` 常量默认 `false` 作证伪开关。⑥ **已知边界**：native 侧「空段零候选为何走 initial-setup」未明，不写死成因；此类词之后 `core.state.assoc_seg` 按联想段置真（E 档真机未见异常）；**候选栏无视觉副作用（真机确认）** —— 无候选时仍显示工具栏 / menu 图标、无空白项，空文本候选仅在引擎层计数、展示层被跳过，印证判据与前端渲染解耦 | `lua/smart_assoc.lua`（纯 lua，覆盖后重启引擎即可，无需重编译 schema） | **真机 I 档验收通过**（「修改」「调序」及反复点击全部软重启）；diff 仅 1 行代码 + 注释，LF 行尾、`git diff --check` 干净；README v2.21→v2.22、BASELINE 本行；**真机补验：候选栏无空白项、无视觉副作用**；本次已提交 git 并推送、已同步项目库 `/01-资料/` 与 `/02-产物/`；S142 包与 `dc6b240` 为历史快照、其中 11-08 旧结论已由本行统一更正，勿再引用 |
 
+| 2026-11-10 | **26 键回归标准五笔逻辑 + README 拆分（v2.23，S145）**：① 合入 fixed B 版两个 schema —— `ly_wubi` 移除第 5 码筛选四件套（`lua_filter@*wubi_pinyin_filter` / `script_translator@wubi_prefix` / `wubi_prefix:` / `wubi_pinyin_filter:`），`max_code_length` 5→4，定稿 `auto_select: true` + `auto_select_pattern: '^[a-y][a-z]{3}$'` + `auto_clear: max_length` + `enable_completion: true`；实现 4 码唯一自动上屏、4 码重码保留候选不顶首、第 5 码顶首成为下一字首码、4 码空码清空重起段、`z` 拼音反查正常。② `ly_wubi_14` 补全 12 个 `wubi_prefix` 字段并显式 `auto_select_unique_candidate: false`，不穿透；双混不 include 26 键。③ **文档重构**：README 只留特性 / 功能 / 结构，补 26 键标准五笔逻辑、自动连词造词、命令速查；历次更新记录迁至 `dev/docs/更新日志.md`（随 git 分发、不进 S 包，包内仍 67 文件）。④ 版本口径同步 README 头部 / 更新日志 / 本文件；`info.yaml` 的 `version` 固定 `"2.0"`、仅 `update_time` → 2026-11-10。⑤ **口径修正**：`auto_clear: max_length` 不是 A5 元凶（只在 fixed 初版组合下出问题），A/B 真机三项全通过（`khlg`+`z`、`pqpq`+`w`、`wqin`）；机制未证实、不断言根因 | 26 键 + 14 键 schema、文档、版本口径 | 真机 A/B 复测全通过；S145 打包 67 文件校验；本次 git 提交并推送 |
 ---
 
 ## 八、Git 仓库管理（2026-10-21 重构；2026-10-24 根上移至 `dev/`）
@@ -326,7 +328,7 @@ bash dev/tools/pack-release.sh
 - **排除**：user.yaml、installation.yaml（本机安装配置）、custom_phrase.txt 及 custom_phrase.db*（自造词动态库）、user_coined_ext.txt（运行时自动生成，含其备份 .bak）、*.userdb/、log/、lua/input_stats_*.lua 及 .bak（未挂载死代码）、lua/sequence_*.txt（调序数据存于用户数据目录）、themes/public/**（空间级公共资源，随 app 提供）、任何层级的 build/（编译产物）
 - **生成**：build/default.yaml 仅含 schema_list 四项（ly_wubi_pinyin / ly_wubi_pinyin_14 / ly_wubi / ly_wubi_14），与源码中的 build/default.yaml 无关，脚本每次生成
 - 脚本内置数量校验：≠60 时告警（曾靠它抓到 themes/14key_wubi/build/ 漏排）
-- **部署前清 build（通用卫生建议，2026-11-08 更正：非故障成因）**：「打包排除 build」≠「真机没有旧 build」。`pack-release.sh` 已排除全部 build，S 包干净；若把开发目录 `dev/space` 直接挂给手机，建议删 `space/schemas/TouchWB/build/` 与 `space/build/space.yaml` 让 App 现场重编译。**早间曾把「切方案键盘冷重启」归因于此并写成铁律、后又归因于调序库生命周期，两条结论都已被真机单变量诊断推翻**——真正判据是上屏后 predictor 空段有没有候选（见变更记录 2026-11-08 第 3 行与 README 2026-11-08 更新日志），清 build 不再视为该故障的解法
+- **部署前清 build（通用卫生建议，2026-11-08 更正：非故障成因）**：「打包排除 build」≠「真机没有旧 build」。`pack-release.sh` 已排除全部 build，S 包干净；若把开发目录 `dev/space` 直接挂给手机，建议删 `space/schemas/TouchWB/build/` 与 `space/build/space.yaml` 让 App 现场重编译。**早间曾把「切方案键盘冷重启」归因于此并写成铁律、后又归因于调序库生命周期，两条结论都已被真机单变量诊断推翻**——真正判据是上屏后 predictor 空段有没有候选（见变更记录 2026-11-08 第 3 行与 `dev/docs/更新日志.md` 2026-11-08 条目），清 build 不再视为该故障的解法
 
 ### 推送历史（2026-10-21 首推 → 2026-10-24 根上移）
 
