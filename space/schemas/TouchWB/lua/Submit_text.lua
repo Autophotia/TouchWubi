@@ -360,7 +360,11 @@ local function commit_text_processor(key, env)
             engine:commit_text(_ct)
             -- ★ 手动造词同步累积（PC 端 notifier 的 commit_history 不可用，见 coin_accumulate）
             coin_accumulate_sync(_ct)
-            if core.stats_report then core.stats_report(_ct) end
+            -- 只统计带编码上屏：联想候选在 predictor 空段（ctx.input 为空），不得计入。
+            -- 此处 context:clear() 已执行，判据用函数开头缓存的 input_text。
+            if core.stats_report and input_text and input_text ~= "" then
+                core.stats_report(_ct)
+            end
             return 1
         end
     end

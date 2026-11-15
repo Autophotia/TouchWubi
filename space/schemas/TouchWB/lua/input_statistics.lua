@@ -29,9 +29,9 @@
 --   💾 自动保存统计数据，重启后不丢失（按方案分开存储）
 --   📈 自动保存昨日统计数据，方便与昨日进行对比
 --   ⏱️ 临时统计功能，可记录特定时间段输入情况
---   ⚡ 极速基于≥3秒输入段中最快的段速度（字/分）
+--   ⚡ 最快一分钟：60 秒滑动窗口内「带编码上屏汉字数」的全天最大值（字/分），与 /js 同口径
 --   📊 均速基于总字数/总连续输入时间（字/分），仅统计持续≥3秒的段
---   🔄 10秒间隙自动切断连续输入段，统计真实净速度
+--   🔄 10秒间隙自动切断连续输入段，统计真实净速度（只影响均速分段，不参与最快一分钟）
 --   💾 保存前自动备份（.bak文件）
 --   🎯 只统计「按编码打字上屏」：上屏瞬间输入码非空才计入，
 --      点联想词 / 复制粘贴 / 语音转文字（无编码上屏）一律排除。
@@ -60,8 +60,6 @@
 local SEPARATOR_LINE = string.rep("─", 12)
 local core = require "core"
 
--- 移动端判定统一走 core.is_mobile()（2026-11-04 去重，见 core.lua）。
-
 -- 移动端判定：core.is_mobile() 内部已防御式访问 rime_api，无需外层 pcall
 local MOBILE_MODE = core.is_mobile()
 
@@ -85,7 +83,8 @@ local input_stats = input_stats or {
     daily_max = 0,
     weekly_max = 0,
     recent = {},          -- 用于临时统计的最快一分钟，主统计不再使用
-    yesterday = {count = 0, length = 0, fastest = 0, ts = 0}
+    yesterday = {count = 0, length = 0, fastest = 0, ts = 0},
+    speed_ver = 0         -- 最快一分钟口径：2=60 秒滑窗；旧值在 load 时迁移
 }
 
 -- 连续输入段追踪（局部变量，每个方案独立）
@@ -97,6 +96,10 @@ local avgSpdInfo = {
     gapThd = 10,          -- 间隙阈值（秒）
     count = 0             -- 当前段累计字数
 }
+
+-- 最快一分钟滑窗：仅运行时状态、不写盘，与临时统计专用的 input_stats.recent 相互独立
+local speed_window = { recent = {} }
+local SPEED_WINDOW_SEC = 60
 
 -- 模块级环境引用（init 时赋值，供 report_commit_text 与 Submit_text 桥接使用）
 local STATS_ENV = nil
@@ -286,14 +289,24 @@ local function calculate_avg_speed(stat)
     return 0
 end
 
--- 更新极速（基于≥3秒的输入段速度：所有段中速度最快的那个段）
--- @param seg_time: 段持续时间（秒）
--- @param seg_count: 段内字数
-local function update_fastest(stat, seg_time, seg_count)
-    if seg_time >= 3 and seg_count > 0 then
-        local spd = seg_count / seg_time * 60
-        if spd > (stat.fastest or 0) then
-            stat.fastest = spd
+-- 更新「最快一分钟」：累计 60 秒滑窗内带编码上屏的汉字数，更新四个周期最大值。
+-- 仅由 update_stats 的 input_length > 0 分支调用（编码非空已由调用方判定）。
+local function update_speed_window(input_length)
+    local now = os.time()
+    table.insert(speed_window.recent, {ts = now, len = input_length})
+    local cutoff = now - (SPEED_WINDOW_SEC - 1)
+    local kept, total = {}, 0
+    for _, item in ipairs(speed_window.recent) do
+        if item.ts >= cutoff then
+            total = total + (item.len or 0)
+            table.insert(kept, item)
+        end
+    end
+    speed_window.recent = kept
+    for _, period in ipairs({"daily", "weekly", "monthly", "yearly"}) do
+        local stat = input_stats[period]
+        if stat and total > (stat.fastest or 0) then
+            stat.fastest = total
         end
     end
 end
@@ -330,7 +343,7 @@ local function update_stats(input_length, is_segment_end, env)
 
     -- 周期重置逻辑
     if input_stats.daily.ts ~= day_ts then
-        -- 每日重置前：将当日极速同步到周/月/年（取最大值）
+        -- 每日重置前：将当日「最快一分钟」同步到周/月/年（取最大值）
         local daily_fastest = input_stats.daily.fastest or 0
         if daily_fastest > 0 then
             for _, period in ipairs({"weekly", "monthly", "yearly"}) do
@@ -341,6 +354,7 @@ local function update_stats(input_length, is_segment_end, env)
         input_stats.daily = {count = 0, length = 0, fastest = 0, ts = day_ts, avgGaps = {}, avgCnts = {}}
         input_stats.daily_max = 0
         input_stats.recent = {}
+        speed_window.recent = {}   -- 跨日不把昨天的窗口尾巴带进今天
         -- 检测到新的一天，立即保存到文件（确保昨日数据持久化）
         if env and env.engine and env.engine.schema then
             save_stats(env.engine.schema.schema_id)
@@ -376,11 +390,7 @@ local function update_stats(input_length, is_segment_end, env)
             add_to_stat(input_stats.weekly)
             add_to_stat(input_stats.monthly)
             add_to_stat(input_stats.yearly)
-            -- 段结束时更新极速（基于≥3秒段速度）
-            update_fastest(input_stats.daily, delt, avgSpdInfo.count)
-            update_fastest(input_stats.weekly, delt, avgSpdInfo.count)
-            update_fastest(input_stats.monthly, delt, avgSpdInfo.count)
-            update_fastest(input_stats.yearly, delt, avgSpdInfo.count)
+            -- 段结算只写均速样本；最快一分钟由 60 秒滑窗单独维护。
         end
     end
 
@@ -400,13 +410,15 @@ local function update_stats(input_length, is_segment_end, env)
         end
 
         input_stats.lengths[input_length] = (input_stats.lengths[input_length] or 0) + 1
+
+        update_speed_window(input_length)
     end
 end
 
 -- ★ 上屏计数入口（commit_notifier 与 Submit_text 快捷上屏桥接共用）
 --   只统计「按编码打字上屏」的内容；编码非空判据由调用方负责：
 --   - commit_notifier：先判 ctx.input 非空再调用（排除点联想/复制/语音）
---   - Submit_text 快捷上屏：空格/分号/引号本就是编码上屏，直接调用
+--   - Submit_text 快捷上屏：空格/分号/引号三条路径各自校验编码非空后调用
 local function report_commit_text(commit_text)
     if not commit_text or commit_text == "" then return end
 
@@ -551,6 +563,7 @@ local function load_stats_from_lua_file(schema_id)
     end)
     
     if ok and type(result) == "table" then
+        local loaded_ver = result.speed_ver   -- 以「文件自带版本」判迁移，避免多方案共用模块时漏迁
         for k, v in pairs(result) do
             input_stats[k] = v
         end
@@ -565,6 +578,16 @@ local function load_stats_from_lua_file(schema_id)
         input_stats.yesterday = input_stats.yesterday or {count = 0, length = 0, fastest = 0, ts = 0}
         input_stats.daily_max = input_stats.daily_max or 0
         input_stats.weekly_max = input_stats.weekly_max or 0
+        -- 口径迁移：旧 fastest 是段折算速度、与新口径不可比，首次加载旧文件只归零 fastest，
+        -- 其余数据（字数 / 上屏次数 / 昨日对比 / 均速样本）全部保留。
+        if loaded_ver ~= 2 then
+            for _, period in ipairs({"daily", "weekly", "monthly", "yearly"}) do
+                input_stats[period].fastest = 0
+            end
+            input_stats.yesterday.fastest = 0
+            input_stats.speed_ver = 2
+            save_stats(schema_id)
+        end
     else
         -- 初始化空表
         input_stats = {
@@ -576,7 +599,8 @@ local function load_stats_from_lua_file(schema_id)
             daily_max = 0,
             weekly_max = 0,
             recent = {},
-            yesterday = {count = 0, length = 0, fastest = 0, ts = 0}
+            yesterday = {count = 0, length = 0, fastest = 0, ts = 0},
+            speed_ver = 2
         }
     end
 end
@@ -627,7 +651,7 @@ local function format_daily_summary(schema_name)
     end
     
     local avg_speed = calculate_avg_speed(s)
-    local fastest = s.fastest or 0  -- 极速为最快段速度（字/分）
+    local fastest = s.fastest or 0  -- 最快一分钟：60 秒滑动窗口内的最大汉字数
     
     -- 计算与昨日的对比
     local comparison_text = ""
@@ -653,7 +677,7 @@ local function format_daily_summary(schema_name)
         "%s\n"..
         "共上屏[%d]次\n"..
         "共输入[%d]字\n"..
-        "极速[%.1f]字/分\n"..
+        "最快一分钟[%.0f]字\n"..
         "均速[%.1f]字/分\n"..
         "%s\n"..
         "%s\n"..
@@ -670,6 +694,7 @@ local function format_daily_summary(schema_name)
 end
 
 -- 周统计报告（末尾增加换行）
+-- daily_max = 今日单次上屏最大汉字数（跨日 / 清空重置），不是「周内单日最大」。
 local function format_weekly_summary(schema_name)
     local s = input_stats.weekly or {count = 0, length = 0, fastest = 0, avgGaps = {}, avgCnts = {}}
     if s.count == 0 then 
@@ -684,9 +709,9 @@ local function format_weekly_summary(schema_name)
         "%s\n"..
         "共上屏[%d]次\n"..
         "共输入[%d]字\n"..
-        "极速[%.1f]字/分\n"..
+        "最快一分钟[%.0f]字\n"..
         "均速[%.1f]字/分\n"..
-        "周内单日最多一次输入[%d]字\n"..
+        "今日单次上屏最多[%d]字\n"..
         "%s\n"..
         "◉ 方案：%s\n",
         SEPARATOR_LINE,
@@ -701,6 +726,7 @@ local function format_weekly_summary(schema_name)
 end
 
 -- 月统计报告（末尾增加换行）
+-- weekly_max = 已结束周中最大的「周总字数」，不是「一次输入字数」。
 local function format_monthly_summary(schema_name)
     local s = input_stats.monthly or {count = 0, length = 0, fastest = 0, avgGaps = {}, avgCnts = {}}
     if s.count == 0 then 
@@ -715,9 +741,9 @@ local function format_monthly_summary(schema_name)
         "%s\n"..
         "共上屏[%d]次\n"..
         "共输入[%d]字\n"..
-        "极速[%.1f]字/分\n"..
+        "最快一分钟[%.0f]字\n"..
         "均速[%.1f]字/分\n"..
-        "月内单周最多一次输入[%d]字\n"..
+        "月内单周最多输入[%d]字\n"..
         "%s\n"..
         "◉ 方案：%s\n",
         SEPARATOR_LINE,
@@ -732,6 +758,7 @@ local function format_monthly_summary(schema_name)
 end
 
 -- 年统计报告（末尾增加换行）
+-- lengths 的众数 = 单次上屏汉字数，可能是 1（单字），故不称「词组」。
 local function format_yearly_summary(schema_name)
     local s = input_stats.yearly or {count = 0, length = 0, fastest = 0, avgGaps = {}, avgCnts = {}}
     if s.count == 0 then 
@@ -758,9 +785,9 @@ local function format_yearly_summary(schema_name)
         "%s\n"..
         "共上屏[%d]次\n"..
         "共输入[%d]字\n"..
-        "极速[%.1f]字/分\n"..
+        "最快一分钟[%.0f]字\n"..
         "均速[%.1f]字/分\n"..
-        "您最常输入长度为[%d]的词组\n"..
+        "最常单次上屏[%d]字\n"..
         "%s\n"..
         "◉ 方案：%s\n",
         SEPARATOR_LINE,

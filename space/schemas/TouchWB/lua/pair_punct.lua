@@ -100,10 +100,21 @@ local direct_punct_map = {
     --   不放进表：空状态由 punctuator 弹列表可选变体；
     --            打码中由 pool_punct_set 分支保持「首候选 + #」（与 `= @ / ~` 同类）。
     ["$"] = "￥",
-    ["%"] = "%",
+    -- ★ `%` `*` **不能**放进这张表（2026-11-15 移除，理由与下面 `#` 相同）：
+    --   落进来空状态会被 commit_text 直接上屏单字符 + return 1，完全绕开 punctuator，
+    --   symbols.yaml 里 `'*' : [ ＊, ·, ・, ×, ※, ❂ ]`、
+    --   `'%' : [ '%', ％, °, ℃, ‰, ‱, ℉ ]` 的候选变体菜单就永远弹不出来
+    --   （真机实测：* % 成了独立标点；% 仅「上屏后联想段豁免」时偶然弹一次菜单）。
+    --   移出后：空状态 return 2 放行 punctuator ⇒ 弹候选菜单；
+    --   打码中仍由 pool_punct_set 分支保持「首候选 + 符号」（与 `= @ # /` 同类）。
+    --   ⚠ 算式模式由排在 processors 链首的 calc_symbol_processor 先接管，不受本次改动影响。
     ["&"] = "&",
-    ["*"] = "*",
-    ["~"] = "~",
+    -- ★ `~` **不能**放进这张表（2026-11-15 移除，理由同 `#` `*` `%`）：
+    --   空状态会被 commit_text 直接上屏单字符 + return 1，绕开 punctuator，
+    --   symbols.yaml L64 `'~' : [ ～, '~', ˜, ≈, ≋, ≃, ≅, ≇, ∽, ⋍, ≌, ﹏, ﹋, ﹌ ]`
+    --   的 14 项候选变体菜单就永远弹不出来。
+    --   移出后：空状态 return 2 放行 punctuator ⇒ 弹候选菜单；
+    --   打码中仍由 pool_punct_set 分支保持「首候选 + ~」（与 `= @ # / * %` 同类）。
     ["|"] = "·",
     -- ★ `'` **要**放进这张表：否则它会掉到下面
     --   `if base_key_value == "apostrophe" then return 1` 那句被干吞掉（什么都不出）。
@@ -282,9 +293,11 @@ function processor.func(key, env)
     if key_char == "caret" then key_char = "^" end
     -- ★ 2026-09-29 修复：26 键 A 键上滑 `~` 会把候选顶进编码栏，而不是顶候选上屏。
     --   根因：librime 对 `~` 给的按键名是 **asciitilde**，而这里只映射了 "tilde"
-    --   ⇒ key_char 停在 "asciitilde" ⇒ direct_punct_map 查不到 ⇒ is_direct_punct=false
-    --   ⇒ 一路 return 2 放行 ⇒ 字符被 speller / punctuator 收走，候选留在编码栏。
-    --   实测 28 个标点里 `~` 是唯一中招的（其余都走 direct_punct_map 正常顶上屏）。
+    --   ⇒ key_char 停在 "asciitilde" ⇒ 规则表查不到 ⇒ 一路 return 2 放行
+    --   ⇒ 字符被 speller / punctuator 收走，候选留在编码栏。
+    --   实测 28 个标点里 `~` 是唯一中招的。
+    --   ⚠ 2026-11-15：`~` 已从 direct_punct_map 移出（改为放行 punctuator 弹候选菜单），
+    --     但此映射仍必须保留 —— 打码中的 pool_punct_set["~"] 顶字分支要靠它拿到 "~"。
     if key_char == "tilde" or key_char == "asciitilde" then key_char = "~" end
     if key_char == "asterisk" then key_char = "*" end
     if key_char == "at" then key_char = "@" end
