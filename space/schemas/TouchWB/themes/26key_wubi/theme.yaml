@@ -852,7 +852,7 @@ preset_keyboards:
       - { custom_key: handwriting, width: 88, height: 152, height_land: 110, name: handwriting_pad }
       - { click: backspace, width: 12, name: backspace, swipe_down: function_keyboard_undo, swipe_up: function_keyboard_clearAll }
   # 画板下方占位 + 右侧标点列
-      - { width: 86 }
+      - { width: 88 }
       - { collection: ["，", "。", "？", "！"], width: 12, height: 99, height_land: 72, row_height: 26, row_height_land: 35, row_vertical_gap: 3, show_row_back_image: false, name: table }
       - { width: 100 }
   # 底栏：符 | 123 | ， | 空格 | 。 | 中英 | 回车（横屏分屏键）
