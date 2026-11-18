@@ -1,7 +1,7 @@
 # TouchWB / 流萤 · 项目基线（BASELINE）
 
 > **基线版本**：v2.19（README 口径 2026-11-04）
-> **当前版本**：v2.25 / 2026-11-16（S147；README 头部、`dev/docs/更新日志.md`、本文件第七节三处同步）
+> **当前版本**：v2.26 / 2026-11-18（S148；README 头部、`dev/docs/更新日志.md`、本文件第七节三处同步）
 > **基线日期**：2026-11-04（重定义基线，作为「模块化重构 + 类型定义库 + 纯内存状态表」新项目的起点）
 > **基线范围**：`D:\AutophotiaIME\dev\space\schemas\TouchWB` 方案本体，82 个文件（不含 build 编译产物，2026-11-04 实测）
 > **用途**：后续所有功能拓展、优化、Bug 修复均以此文件为对照基准；每次变更在此追加「变更记录」，保证任何时候都能回答"当前版本和基线差了什么"。
@@ -15,7 +15,7 @@
 | 项目 | TouchWB 五笔输入法方案（Rime 内核） |
 | 上游 | 空山明月底包 → Shawx（TouchWubi）→ **Autophotia（流萤）**当前维护 |
 | 仓库 | https://github.com/Autophotia/TouchWubi |
-| 当前版本 / 日期 | v2.25 / 2026-11-16（基线值 v2.19 / 2026-11-04）；历次更新记录见 `dev/docs/更新日志.md` |
+| 当前版本 / 日期 | v2.26 / 2026-11-18（基线值 v2.19 / 2026-11-04）；历次更新记录见 `dev/docs/更新日志.md` |
 | info.yaml version | **"2.0" ⛔ 禁止修改**（输入法识别用；2026-10-25 事故：曾改 2.3 致导入后输入法不认，已回退）/ update_time 2026-10-31 |
 | 默认方案 | `ly_wubi_14`（拇指五笔 14 键，项目默认口径；space.custom.yaml 当前实测为 `ly_wubi`，见 B-12） |
 | 默认主题 | `14key_wubi`（移动端）/ PC 用系统主题 |
@@ -251,6 +251,7 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 
 | 2026-11-10 | **26 键回归标准五笔逻辑 + README 拆分（v2.23，S145）**：① 合入 fixed B 版两个 schema —— `ly_wubi` 移除第 5 码筛选四件套（`lua_filter@*wubi_pinyin_filter` / `script_translator@wubi_prefix` / `wubi_prefix:` / `wubi_pinyin_filter:`），`max_code_length` 5→4，定稿 `auto_select: true` + `auto_select_pattern: '^[a-y][a-z]{3}$'` + `auto_clear: max_length` + `enable_completion: true`；实现 4 码唯一自动上屏、4 码重码保留候选不顶首、第 5 码顶首成为下一字首码、4 码空码清空重起段、`z` 拼音反查正常。② `ly_wubi_14` 补全 12 个 `wubi_prefix` 字段并显式 `auto_select_unique_candidate: false`，不穿透；双混不 include 26 键。③ **文档重构**：README 只留特性 / 功能 / 结构，补 26 键标准五笔逻辑、自动连词造词、命令速查；历次更新记录迁至 `dev/docs/更新日志.md`（随 git 分发、不进 S 包，包内仍 67 文件）。④ 版本口径同步 README 头部 / 更新日志 / 本文件；`info.yaml` 的 `version` 固定 `"2.0"`、仅 `update_time` → 2026-11-10。⑤ **口径修正**：`auto_clear: max_length` 不是 A5 元凶（只在 fixed 初版组合下出问题），A/B 真机三项全通过（`khlg`+`z`、`pqpq`+`w`、`wqin`）；机制未证实、不断言根因 | 26 键 + 14 键 schema、文档、版本口径 | 真机 A/B 复测全通过；S145 打包 67 文件校验；本次 git 提交并推送 |
 | 2026-11-16 | **标点候选补全：成对括号 〚〛〘〙（v2.25，S147）**：`symbols.yaml` 的 `full_shape`/`half_shape` 两表，`[` 候选末尾补 `〚 〘`、`]` 候选末尾补 `〛 〙`（各 4 行末尾追加，首项 `「」` 不变）。缘由：`pair_punct.lua` 的 `pairTable` 已定义这四者配对、`symbol_whitelist` 已收录，但两表候选缺失 ⇒ 配对逻辑悬空、入口选不到，补入后对齐。本轮对话同时澄清机制：punctuator 选表由开关9 `full_shape` 决定（`ascii_punct` 是让路开关非选表），两表各读一张绝不合并，「半角态含全角」是 `half_shape` 表内混列变体所致。纯标点候选补全，无 lua/schema/词典改动；S147 打包 67 文件 | `symbols.yaml`（纯候选配置） | `git diff --stat` 8 行（4+/4-）、行尾全 LF（CRLF=0）；版本口径同步 README 头部 / 更新日志 / 本文件三处，`info.yaml` version 固定 `"2.0"`、仅 `update_time` → 2026-11-16 |
+| 2026-11-18 | **手写键盘布局化 + 横屏手写 + 下滑数字开关 + 主题字段统一（v2.26，S148）**：① 新增 `swipe_num_action` 下滑数字开关——`super_sequence.lua` 数字键在 `get_option("swipe_num_action")==true` 时 `return kNoop` 放行 selector 原生上屏（同 PC 数字选字），4 份 schema 各加 switch（`reset:0` 默认调序）。② 手写改主题内 `handwriting` 布局（弃 public `__include`、内联三行行宽和=100，`select:handwriting` 切入/`select:default` 智能返回，加 `lock:true`），14/26 键主键盘中英键上滑进手写。③ 横屏手写 `handwriting_land`（字面 `select:handwriting_land`、底栏键全 `_land` 版 select），中英/中写来回切正常；英写进手写即回中文为手写固有行为（`ascii_mode:0`+`send:Eisu_toggle`）。④ 主题字段统一：删 4 布局字号死字段（24 行）、删 `height_land` 死字段、9 布局 `height`=46、preview 统一、补 4 个 `_sm_md` 小屏布局。版本口径同步 README 头部/更新日志/本文件，`info.yaml` `version` 固定 `"2.0"`、仅 `update_time`→2026-11-18 | 4 份 schema、`super_sequence.lua`、14/26 键 theme.yaml、README/更新日志/BASELINE | `swipe_num_action` 沙盒 8/8 PASS（待真机）；横屏手写、中英/中写来回切真机通过；字段清理源码实证；S148 打包 67 文件校验 |
 | 2026-11-15 | **键盘标点与长按统一化 + 输入统计口径优化（v2.24，S146）**：① **主题层**：14/26 键标点布局对齐中文主 `default`；英文布局清上滑全角、14 键英文套用 26 键标点并补 6 条半角定义；长按动作重写为仅含当前键实际输出字符、删约 145 条无引用定义，长按字母与 `= / @ /` 改 `commit_*` 直上屏（裸字符会被 `speller.alphabet` 当输入码）；数字键盘退格下滑由重做改撤销；成对标点全角上滑 `text: "（）{Left}"` 顶字上屏、半角下滑 `text: "{function_rime_clear}X"` 清候选直接上屏。② **引导符口径（用户 11-15 定）**：`= @ # / * % ~` 走 `send_*` 按键通道——有候选时由 `lua/pair_punct.lua` 的 `pool_punct_set` 顶「首候选 + 符号」，无候选时放行 punctuator 弹候选菜单并触发引导；为此从 `direct_punct_map` 移除 `* % ~`（与 `#` 同待遇）。「写法相同、行为不同」的分界是**通道**（`send:`/裸字符过 Lua，`text:`/`commit:` 前端直插不过），不是动作名或全半角；动作名不可与 `preset_keys` 同名（本地同名覆盖真机不生效）。③ **统计口径**：删除 `update_fastest`（≥3 秒段折算取 max，真机出现 144 字/分），改为 **60 秒滑动窗口内带编码上屏汉字数的全天最大值**，四份报告 `极速[%.1f]字/分` → `最快一分钟[%.0f]字`；新增 `speed_ver` 按文件自带版本迁移（只归零 `fastest`、其余数据保留）；均速的 `avgGaps/avgCnts`、`gapThd=10`、≥3 秒门槛一律不动。补 `Submit_text.lua` 空格快捷上屏的 `input_text ~= ""` 判据，使空格/分号/引号三条路径一致排除 predictor 空段联想候选。④ **报告语义**：周报改「今日单次上屏最多」（`daily_max`）、月报去「一次」（`weekly_max` 是周总字数）、年报改「最常单次上屏 N 字」（众数可能是单字）。⑤ 版本口径同步 README 头部 / 更新日志 / 本文件三处；`info.yaml` 的 `version` 仍固定 `"2.0"`、仅 `update_time` → 2026-11-15；新增 `dev/docs/输入统计口径核查_2026-11-15.md` 归档真机数据实证 | 14/26 键 theme.yaml、`lua/pair_punct.lua`、`lua/input_statistics.lua`、`lua/Submit_text.lua`、README/更新日志/BASELINE | **真机：所有上滑/下滑均达标**（全角顶字、半角清候选直上屏）；统计侧真机 80 段数据定位 144 = 第 9 段 `(5s,12字)`，窗口衰减实证 20 秒起平台期 90.7 字/分 ⇒ 60 秒无额外稀释；lupa(Lua 5.4) compile + YAML 解析通过，mock 引擎验证旧文件迁移与「最快一分钟[12]字」；行尾统一 LF、`git diff --check` 干净；**S146 按同版补丁惯例覆盖重打包（67 文件）**；本次 git 提交并推送 |
 ---
 

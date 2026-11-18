@@ -1286,6 +1286,21 @@ function P.func(key_event, env)
 
         local keycode = key_event.keycode
 
+        -- ★ 下滑数字功能切换（swipe_num_action，两态开关，定义于 schema switches）：
+        --   【数字调序】false/缺省：保留下方原有手动调序逻辑（pin_candidate_index → F 过滤器）。
+        --   【数字上屏】true：本处理器不吞数字键，放行给下游 selector 按序号选候选上屏，
+        --                     与 PC 端（MOBILE_MODE=false，数字直达 selector）完全一致。
+        --   只对数字键 0x30..0x39 生效，非数字键保持原路径（不误伤 Ctrl 等分支）；
+        --   位于 input_text 空 / 计算器两个早退之后，联想空段与算式语义不变。
+        if keycode >= 0x30 and keycode <= 0x39 then
+            local ok_num_act, num_commit = pcall(function()
+                return context:get_option("swipe_num_action")
+            end)
+            if ok_num_act and num_commit == true then
+                return RIME_PROCESS_RESULTS.kNoop
+            end
+        end
+
         -- 数字键 1：撤销上次调序（移动端下滑数字）
         if keycode == 0x31 then
             pin_candidate_index = 1  -- 1 表示撤销
