@@ -53,8 +53,8 @@
 --     · 空格：走 Submit_text 的 Lua 快捷上屏（不经 notifier），由
 --       core.expand_stat_short 查表取全文。
 --   报告正文（含分隔线、多行排版）一字不改，只是不再出现在候选栏。
---   ★ 短标题统一以 `◉` 开头：沿用 report_commit_text 的 `^[※◉]` 过滤，
---     保证「查看统计」这个动作本身不会被计入输入统计。
+--   ★ 短标题统一以 `◉` 开头（视觉辨识用）；「查看统计不计入字数」已由
+--     report_commit_text 的「输入码以 / 开头」判据保证，不再按文本前缀过滤。
 -- ============================================================
 
 local SEPARATOR_LINE = string.rep("─", 12)
@@ -247,10 +247,11 @@ local function start_of_year(t)
     return os.time{year=t.year, month=1, day=1, hour=0}
 end
 
--- 判断是否是统计命令
-local function is_summary_command(text)
-    return text == "/tj" or text == "/qk" or text == "/ks" or text == "/js" or text == "/tc"
-end
+-- 2026-11-26 删除 is_summary_command(text) 与文本前缀 ^[※◉] 两道兜底：
+--   两道都按「上屏文本」判断，而统计回调拿到的已是短标题展开后的全文，
+--   逐个命令/逐种前缀维护既不稳妥也漏得掉；命令上屏的输入码必以 / 开头，
+--   由 report_commit_text 的 commit_code 判据一次覆盖，文本兜底属重复劳动。
+--   （已核对 ※/◉ 文本全部来自 /tj /js /zc* /lx* /tx* /py* 等 / 命令。）
 
 -- 获取方案显示名称（优先中文名）
 local function get_schema_display_name(env)
@@ -419,14 +420,19 @@ end
 --   只统计「按编码打字上屏」的内容；编码非空判据由调用方负责：
 --   - commit_notifier：先判 ctx.input 非空再调用（排除点联想/复制/语音）
 --   - Submit_text 快捷上屏：空格/分号/引号三条路径各自校验编码非空后调用
-local function report_commit_text(commit_text)
+--   ★ 2026-11-26 命令上屏判据改为「输入码以 / 开头」：
+--     hook_expand 的 group=-1 前置回调已把 /jq /gz /nl /jt /txtj 等短标题换成
+--     全文（正文以 === 或汉字开头），统计回调拿到的是全文，按文本前缀
+--     ^[※◉] 只能挡住 /tj /h，挡不住这些命令 ⇒ 全文被当成一次打字计入，
+--     实测 lengths 出现 59 字单次上屏，并把「最快一分钟」推到 192。
+--     命令上屏瞬间 ctx.input 仍是 /jq 等命令串，按输入码过滤一次覆盖全部命令，
+--     不必逐条维护命令清单，也不必按上屏文本猜命令（每个命令正文都不同）。
+--   @param commit_code 上屏瞬间的输入码；以 / 开头的命令上屏不计入统计
+local function report_commit_text(commit_text, commit_code)
     if not commit_text or commit_text == "" then return end
 
-    -- 排除统计命令
-    if is_summary_command(commit_text) then return end
-
-    -- 排除统计报告上屏
-    if commit_text:match("^[※◉]") then return end
+    -- 命令串上屏一律不计入字数/速度（/jq /gz /nl /jt /txtj /tj /h /lx* /tx* ...）
+    if commit_code and commit_code:sub(1, 1) == "/" then return end
 
     -- 只统计汉字长度，排除标点数字
     local input_length = get_chinese_length(commit_text)
@@ -1039,7 +1045,8 @@ local function init(env)
             if not input_at_commit or input_at_commit == "" then return end
 
             local commit_text = ctx:get_commit_text()
-            report_commit_text(commit_text)
+            -- 传入上屏瞬间的输入码：命令串（/jq 等）由 report_commit_text 排除
+            report_commit_text(commit_text, input_at_commit)
         end)
 
     end

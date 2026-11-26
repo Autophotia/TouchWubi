@@ -363,7 +363,7 @@ local function commit_text_processor(key, env)
             -- 只统计带编码上屏：联想候选在 predictor 空段（ctx.input 为空），不得计入。
             -- 此处 context:clear() 已执行，判据用函数开头缓存的 input_text。
             if core.stats_report and input_text and input_text ~= "" then
-                core.stats_report(_ct)
+                core.stats_report(_ct, input_text)
             end
             return 1
         end
@@ -384,7 +384,9 @@ local function commit_text_processor(key, env)
             context:clear()
             engine:commit_text(_ct)
             coin_accumulate_sync(_ct)
-            if core.stats_report then core.stats_report(_ct) end
+            -- 用按键前缓存的 input_text：context:clear() 后 context.input 已空，
+            -- 命令串判据（以 / 开头不计入统计）必须靠它。
+            if core.stats_report then core.stats_report(_ct, input_text) end
             return 1
         end
     end
@@ -399,7 +401,9 @@ local function commit_text_processor(key, env)
             context:clear()
             engine:commit_text(_ct)
             coin_accumulate_sync(_ct)
-            if core.stats_report then core.stats_report(_ct) end
+            -- 用按键前缓存的 input_text：context:clear() 后 context.input 已空，
+            -- 命令串判据（以 / 开头不计入统计）必须靠它。
+            if core.stats_report then core.stats_report(_ct, input_text) end
             return 1
         end
     end

@@ -10,11 +10,13 @@
 #               2026-11-04 core/types/user_coined_db/user_coined_translator）、6+1 schema、4 套词库、
 #         themes/14key_wubi、themes/26key_wubi、predict.db
 #   排除：user.yaml、installation.yaml（本机安装配置）
+#         *.custom.yaml（本机方案自定义配置，2026-11-26 实锤：ly_wubi_pinyin_14.custom.yaml 曾误入包）
 #         custom_phrase.txt 及 .db*（自造词动态库）、user_coined_ext.txt / user_coined_auto.txt（运行时自动生成）、
 #         *.userdb/、log/
 #         lua/input_stats_*.lua 及 .bak（未挂载死代码）、*.bak
 #         lua/sequence_*.txt（调序运行时数据，存于用户数据目录）
 #         themes/public/**（空间级公共主题资源，随 app 提供）
+#         preview_*.png（主题卡片预览图，本机展示资产、不随方案包分发）
 #         build/**（编译产物，仅生成裁剪版 build/default.yaml）
 #   生成：build/default.yaml 仅含 schema_list 四项（ly_wubi_pinyin / ly_wubi_pinyin_14 / ly_wubi / ly_wubi_14）
 set -euo pipefail
@@ -60,7 +62,9 @@ EXCLUDE_FILES = {
     'touchwb_debug.log',          # core.dbg 调试日志（/dbg 运行时生成，勿进包）
 }
 EXCLUDE_DIRS = {'.git', 'log', 'tmp'}
-EXCLUDE_GLOBS = ('*.bak', '*.tmp', '*.db-shm', '*.db-wal', '.DS_Store', 'Thumbs.db', 'desktop.ini')
+EXCLUDE_GLOBS = ('*.bak', '*.tmp', '*.db-shm', '*.db-wal', '.DS_Store', 'Thumbs.db', 'desktop.ini',
+                 '*.custom.yaml',   # 本机方案自定义配置，不随发布包分发
+                 'preview_*.png')   # 主题卡片预览图，本机展示资产
 EXCLUDE_PREFIX_DIRS = ('themes/public',)           # 整棵子树排除
 EXCLUDE_LUA_PREFIX = ('input_stats_', 'sequence_')  # lua/ 下按文件名前缀排除
 

@@ -237,6 +237,8 @@ end
 -- ============================================================================
 -- 写点：input_statistics.lua 模块加载时注入 report_commit_text。
 -- 读点：Submit_text.lua 快捷上屏（空格/分号/引号）后补计数。
+-- 签名：stats_report(commit_text, commit_code)；commit_code 为上屏瞬间输入码，
+--       以 / 开头的是命令上屏，不计入打字字数/速度（2026-11-26 修正）。
 -- 注意：这是「跨模块函数注入」，非瞬时状态信号，故挂在 core 上而非 core.state。
 core.stats_report = nil
 
