@@ -54,6 +54,9 @@
 --            忽略 #/cleared 标记 ⇒ 即「强制恢复」）
 --   /txtj   调序统计（明细只列手动调序记录，按空格上屏；标题同时报「自动 N 条」，
 --            与 /txdc 的「手动 N、自动 M」口径一致 —— 自动调频不进明细，只报条数）
+--            ★ 备份里带 #/cleared 时（/txqk 之后），那部分**不计入有效条数**，
+--              改单列「备份另有 N 条（已标记不自动导回，/txdr 可恢复）」。
+--              否则清空后统计仍报非零，用户只会认为「清空没生效」。
 --
 -- 【自动调频】（第二十轮新增，开关 switches/auto_freq，reset: 1 默认开）
 --   同一编码下**连续**上屏两次的词自动提前（AUTO_FREQ_MIN=2），提前后一直保持在前面，
@@ -849,11 +852,13 @@ local function clear_database(schema_id)
     if not db or not db:loaded() then return 0 end
 
     local keys = {}
+    local db_keys = {}       -- 库内键集合：用来判断备份里哪些记录不在库中
     local records = 0        -- 只数「真正的调序记录」，见下方注释
     local accessor = db:query("")
     if accessor then
         for key, _ in accessor:iter() do
             keys[#keys + 1] = key
+            db_keys[key] = true
             -- ★ 2026-11-27：清空动作照旧擦掉全表（含 rime 自己的元数据键），
             --   但回显的条数只数调序记录 —— 库内还躺着 /db_name、/type、
             --   /rime_version、/user_id 这 4 条元数据，真机实测 3 条记录会被报成
@@ -868,6 +873,22 @@ local function clear_database(schema_id)
         accessor = nil
     end
     for _, key in ipairs(keys) do db:erase(key) end
+
+    -- ★ 2026-11-27 三次修正：把「只存在于有效备份里」的记录也算进回显条数。
+    --   场景：重装后库还没被自动导入（首次读写才导入），用户直接 /txqk ⇒ 报「已清空 0 条」，
+    --   而备份里其实有 2 条刚被标记作废。用户对照 /txtj 的「备份另有 2 条」会再次
+    --   认为「两个命令数字对不上」。这里按「本次一共作废多少条」计数 = 库内 + 备份独有。
+    local extra = 0
+    local bak = read_backup_key_sets(schema_id)
+    if not bak.cleared then
+        for k in pairs(bak.manual) do
+            if not db_keys[k] then extra = extra + 1 end
+        end
+        for k in pairs(bak.auto) do
+            if not db_keys[AF_PREFIX .. k] then extra = extra + 1 end
+        end
+    end
+    records = records + extra
 
     _need_export[schema_id] = false  -- 清除导出标记，防止退出时导出空数据覆盖备份
     _cleared_schemas[schema_id] = true  -- 本次会话阻止自动导入
@@ -1720,8 +1741,10 @@ function F.func(input, env)
     --   自动导入见到标记整份跳过；要恢复必须显式 /txdr。
     if env.engine.context.input == "/txqk" then
         local n = clear_database(schema_id)
+        -- ★ 文案：不写「备份已作废」。文件没删，/txdr 就读它；写「作废」会被读成
+        --   「文件没了」，于是下一个问题必然是「那 /txdr 导的是哪个文件」。
         yield(Candidate("clear_db", 0, #context.input,
-                        string.format("※ 调序已清空（%d 条，含自动调频）；备份已作废，恢复用 /txdr", n), ""))
+                        string.format("※ 调序已清空（%d 条，含自动调频）；备份保留未删，仅标记不自动导回，恢复用 /txdr", n), ""))
         return
     end
 
@@ -1864,6 +1887,12 @@ function F.func(input, env)
         --   ⇒ 明细仍只列手动，但标题把两边的条数摆在一起，与 /txdc 的措辞对齐。
         local auto_seen = {}
         local auto_count = 0
+        -- ★ 2026-11-27 二次修正（用户实测「/txqk 清空后 /txtj 仍报自动 1 条」）：
+        --   那 1 条来自**带 #/cleared 的备份**，不是库里的数据。清空后仍报数，用户
+        --   只会判定「清空没生效」。⇒ 作废备份不再并入有效条数，改单列一行
+        --   「备份另有 N 条」。清空后归零，同时不隐瞒「/txdr 还能恢复」。
+        local void_backup = false    -- 备份头带 #/cleared ⇒ /txqk 已声明「不自动导回」
+        local bak_manual, bak_auto = 0, 0   -- 作废备份中**库内没有**的记录（按词/键去重）
         local af_head = #AF_PREFIX   -- "\002af|" 的长度：库内键 = AF_PREFIX .. 码 .. "|" .. 词
 
         local accessor = db:query("")
@@ -1897,6 +1926,11 @@ function F.func(input, env)
                 if content:sub(1, 3) == "\xef\xbb\xbf" then
                     content = content:sub(4)
                 end
+                -- 标记写在文件头（mark_backup_cleared 第一行），但这里不依赖行序：
+                -- 开头命中或任意行首命中都算。CRLF 下标记行是 "\r\n#/cleared"，查 "\n#/cleared" 同样命中。
+                if content:sub(1, 9) == "#/cleared" or content:find("\n#/cleared", 1, true) then
+                    void_backup = true
+                end
                 for line in content:gmatch("[^\r\n]+") do
                     -- ★ 2026-11-27：备份格式 v2 第一列是类型字母（M 手动 / A 自动）。
                     --   统计仍只覆盖手动调序 —— 自动调频是统计结果、不是用户的手动决定，
@@ -1913,7 +1947,11 @@ function F.func(input, env)
                         local key = string.match(body, "^(.-)\t")
                         if key and not auto_seen[key] then
                             auto_seen[key] = true
-                            auto_count = auto_count + 1
+                            if void_backup then
+                                bak_auto = bak_auto + 1
+                            else
+                                auto_count = auto_count + 1
+                            end
                         end
                     elseif body:sub(1, 1) ~= "#" then
                         local key = string.match(body, "^(.-)\t")
@@ -1921,7 +1959,11 @@ function F.func(input, env)
                             local phrase = key:match("^.-|(.+)$")
                             if phrase and not seen[phrase] then
                                 seen[phrase] = true
-                                table.insert(all_phrases, {phrase = phrase, source = "file"})
+                                if void_backup then
+                                    bak_manual = bak_manual + 1
+                                else
+                                    table.insert(all_phrases, {phrase = phrase, source = "file"})
+                                end
                             end
                         end
                     end
@@ -1930,7 +1972,8 @@ function F.func(input, env)
         end
         
         local count = #all_phrases
-        if count == 0 and auto_count == 0 then
+        local bak_total = bak_manual + bak_auto
+        if count == 0 and auto_count == 0 and bak_total == 0 then
             yield(Candidate("query_db", 0, #context.input, "※ 调序统计：当前无调序数据", ""))
         else
             local lines = {}
@@ -1940,13 +1983,33 @@ function F.func(input, env)
             end
             -- ★ 2026-11-27：标题与 /txdc 的「（手动 N、自动 M）」对齐，
             --   明细仍只列手动 —— 自动只报条数（理由见上面 auto_count 的注释）。
-            local head = "手动 " .. count .. " 条（含备份）"
-            if auto_count > 0 then
-                -- 单独一行，避免「（含备份）（不计明细）」括号叠括号
-                head = head .. "\n自动 " .. auto_count .. " 条（只报条数，不入明细）"
+            local heads = {}
+            if count == 0 and auto_count == 0 then
+                -- 只剩作废备份里的记录：正面说清「库里是空的」，不拿 0 条糊过去
+                heads[#heads + 1] = "库内无调序数据"
+            else
+                -- 「（含备份）」只在备份真的被并进来时才写。备份作废时它被排除在外，
+                -- 再挂这句会让「手动 0 条（含备份）」自相矛盾。
+                local head = "手动 " .. count .. " 条" .. (void_backup and "" or "（含备份）")
+                if auto_count > 0 then
+                    -- 单独一行，避免「（含备份）（不计明细）」括号叠括号
+                    head = head .. "\n自动 " .. auto_count .. " 条（只报条数，不入明细）"
+                end
+                heads[#heads + 1] = head
             end
-            local header = "=== 调序统计 ===\n" .. head .. "\n------------------------\n"
-            local content = header .. table.concat(lines, "\n")
+            if bak_total > 0 then
+                -- ★ 用「已标记不自动导回」而不是「已作废」：文件一直在，/txdr 就读它。
+                --   旧文案「备份已作废」被用户读成「文件删了」，于是问「导入用的哪个文件」。
+                local seg = {}
+                if bak_manual > 0 then seg[#seg + 1] = "手动 " .. bak_manual end
+                if bak_auto > 0 then seg[#seg + 1] = "自动 " .. bak_auto end
+                heads[#heads + 1] = "备份另有 " .. table.concat(seg, "、")
+                                    .. " 条（已标记不自动导回，/txdr 可恢复）"
+            end
+            local content = "=== 调序统计 ===\n" .. table.concat(heads, "\n")
+            if #lines > 0 then
+                content = content .. "\n------------------------\n" .. table.concat(lines, "\n")
+            end
             -- ★ 2026-11-06：多行内容候选栏只显首行标题，上屏还原全文
             --   （与 /jt /jq /gz /nl 同一机制，见 core.register_short_full 注释）。
             --   候选栏不再拖着「1. xxx 2. xxx …」的正文预览；末尾空行由
