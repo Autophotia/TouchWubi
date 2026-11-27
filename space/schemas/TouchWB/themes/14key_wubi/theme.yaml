@@ -41,6 +41,39 @@ preset_keys:
   send_dot: { icon: "textformat.svg", label: ".", send: "." }
   send_caret: { label: "^", send: "^" }
   commit_equal: { label: "=", commit: "=" }          # 长按「=」直插：= 在 speller.alphabet 内，裸字符会被当输入码进拼写流程
+  # ★ 2026-11-26 全键盘长按档位重排（用户真机确认规则，第二版）：
+  #   ★ 松手触发位 = 该键水平位置在长按面板上的投影，不是固定第 3 位：
+  #     中间列键松手触发第 3 位；最左列键（q/a/z）触发第 1 位；最右列键（p/l）触发末位。
+  #   ⇒ 排档原则：把该键要松手出的字符放到「松手位」上。
+  #     注：26 键主题的中文键盘已于 2026-11-27 改为「松手出大写」（大小写互换），见 26key_wubi；
+  #         本（14 键）主题的中文键盘仍为「松手出小写」，未动。
+  #     26 键：普通键 [上滑字符, 大写, 小写, 下滑字符]，小写在第 3 位；
+  #       q 键 [commit_q, Q, 一, 1]（首位小写）；p 键 [〇, P, 0, commit_p]（末位小写）；
+  #       b 键 [B, commit_b, commit_halfat]：★ 2026-11-27 用户定稿 @ 移到末位（显示 B/b/@），
+  #         中英文键盘统一；清空档已删，走 swipe_up；注意小写 b 在第 2 位（此键按用户指定特例，不按松手位）；
+  #       Z 键 [commit_z, commit_Z, "`", "/"]：第 3 位反引号=松手触发造词引导，
+  #         小写 z 保留在第 1 位显示（用户明确要求保留小写 z 的显示）。
+  #     14 键双字母键：最左 qw/as 把小写 q/a 放第 1 位；最右 op 把小写 p 放末位；
+  #       L 键把小写 l 放末位；Z 键同 26 键特例。
+  #   上滑是功能键（撤销/剪切/复制等）的键：功能位留空，档位从大写起排。
+  #   机制：半角 ASCII 字面量 = 发按键（过 Rime ProcessKey）；commit_* = 前端直插文本。
+  #   直插的 ` 只往编辑器塞字符、不进编码栏 ⇒ mkst 分段器认不到 ⇒ 造词引导失效。
+  #   S146 曾把原 [commit_z, commit_halfminus, "`", commit_Z] 改成 [commit_z, Z, commit_halfslash]，
+  #   反引号被顶掉；2026-11-26 经多轮真机反馈定稿为上述排布。
+  #   ★ B/op/b 键长按原带"清空"档（先是裸字面量，一度改成 clear_all_assoc 真动作）：
+  #     2026-11-26 按用户决定整档删除——清空已由 swipe_up: clear_all_assoc 提供，
+  #     长按不再重复放功能档，与其它字母键"长按只放字符"的规则一致；swipe_up 通道未动。
+  # ★ 2026-11-27 英文键盘（ascii_mode）长按统一「小写 - 大写 - 标点」，边缘键单独微调：
+  #   英文里点击本就是小写，长按松手取第 2 位 = 大写，是英文的正解。
+  #   全部字母键默认 [commit_<小写>, <大写>, <标点>]：
+  #     w→[commit_w, W, 2]、a→[commit_a, A, commit_equal]、s→[commit_s, S, ";"]、
+  #     b→[commit_b, B, commit_halfat]（显示 b/B/@）。
+  #   ★ 边缘键按各键松手位调整（用户 2026-11-27 指定）：
+  #     q（最左，松手取第 1 位）= [Q, commit_q, 1]     大写 - 小写 - 数字
+  #     p（最右，松手取末位）  = [commit_p, 0, P]      小写 - 数字 - 大写
+  #     z                      = [commit_z, commit_Z, "/"]  小写 - 大写 - 斜杠（英文键盘删去反引号）
+  #   反引号是中文造词引导（mkst 分段器识别），只在中文主键盘保留；英文键盘不需要。
+  #   ★ 中文主键盘（ascii_mode: 0）仍沿用上面的中文排法，z 键保留反引号。
   send_halfslash: { label: "/", send: "/" }          # 原 commit_halfslash，输出不变
   send_halfpoundsign: { label: "#", send: "#" }      # 原 commit_halfpoundsign，输出不变
   send_asterisk: { label: "*", send: "*" }          # 英文键盘 x 下滑：进 punctuator 弹候选变体
@@ -170,25 +203,25 @@ preset_keyboards:
     ] }
     keys:
   ### 第1行
-      - { click: q, width: 20, label: Q   W, long_click: [Q, commit_q,  1, commit_w,  W], swipe_left: q, swipe_right: w, swipe_down: 1, swipe_up: function_keyboard_cut }
-      - { click: e, width: 20, label: E   R, long_click: [E, commit_e,  2, commit_r,  R], swipe_left: e, swipe_right: r, swipe_down: 2, swipe_up: function_keyboard_copy }
-      - { click: t, width: 20, label: T   Y, long_click: [T, commit_t,  3, commit_y,  Y], swipe_left: t, swipe_right: y, swipe_down: 3, swipe_up: function_keyboard_paste }
-      - { click: u, width: 20, label: U   I, long_click: [U, commit_u,  4, commit_i,  I], swipe_left: u, swipe_right: i, swipe_down: 4, swipe_up: function_keyboard_selectAll }
-      - { click: o, width: 20, label: O   P, long_click: [O, commit_o,  5, commit_p,  P,  "清空"], swipe_left: o, swipe_right: p, swipe_down: 5, swipe_up: clear_all_assoc }
+      - { click: q, width: 20, label: Q   W, long_click: [commit_q, Q, commit_w, W, 1], swipe_left: q, swipe_right: w, swipe_down: 1, swipe_up: function_keyboard_cut }
+      - { click: e, width: 20, label: E   R, long_click: [E, commit_e, commit_r, R, 2], swipe_left: e, swipe_right: r, swipe_down: 2, swipe_up: function_keyboard_copy }
+      - { click: t, width: 20, label: T   Y, long_click: [T, commit_t, commit_y, Y, 3], swipe_left: t, swipe_right: y, swipe_down: 3, swipe_up: function_keyboard_paste }
+      - { click: u, width: 20, label: U   I, long_click: [U, commit_u, commit_i, I, 4], swipe_left: u, swipe_right: i, swipe_down: 4, swipe_up: function_keyboard_selectAll }
+      - { click: o, width: 20, label: O   P, long_click: [O, commit_o, P, 5, commit_p], swipe_left: o, swipe_right: p, swipe_down: 5, swipe_up: clear_all_assoc }
   ### 第2行
-      - { click: a, width: 20, label: A   S, long_click: [A, commit_a,  6, commit_s,  S,  "%"], swipe_left: a, swipe_right: s, swipe_down: 6, swipe_up: "%" }
+      - { click: a, width: 20, label: A   S, long_click: [commit_a, A, "%", commit_s, S, 6], swipe_left: a, swipe_right: s, swipe_down: 6, swipe_up: "%" }
       - { click: d, width: 20, label: D   F, long_click: [D, commit_d,  7, commit_f,  F, commit_halfat], swipe_left: d, swipe_right: f, swipe_down: 7, swipe_up: "@" }
-      - { click: g, width: 20, label: G   H, long_click: [G, commit_g,  8, commit_h,  H,  "#"], swipe_left: g, swipe_right: h, swipe_down: 8, swipe_up: "#" }
-      - { click: j, width: 20, label: J   K, long_click: [J, commit_j,  9, commit_k,  K,  "“”"], swipe_left: j, swipe_right: k, swipe_down: 9, swipe_up: pair_fullquote }
+      - { click: g, width: 20, label: G   H, long_click: ["#", G, commit_g, commit_h, H, 8], swipe_left: g, swipe_right: h, swipe_down: 8, swipe_up: "#" }
+      - { click: j, width: 20, label: J   K, long_click: ["“”", J, commit_j, commit_k, K, 9], swipe_left: j, swipe_right: k, swipe_down: 9, swipe_up: pair_fullquote }
       # ★ pair_bracket：一次出一对（）+ 光标居中（text 直插 + function_rime_clear，不顶候选；
       #   机制见本文件上部定义段）。横竖屏 L 上滑统一为（）。
-      - { click: l, width: 20, label: L, long_click: [commit_l,  0,  L,  "（）"], swipe_down: 0, swipe_up: pair_bracket }
+      - { click: l, width: 20, label: L, long_click: ["（）", L, 0, commit_l], swipe_down: 0, swipe_up: pair_bracket }
   ### 第3行
       - { click: shift, width: 10, has_menu: text_delimiter, name: shift, preview: false }
-      - { click: z, width: 10, label: Z, long_click: [commit_z,  Z, commit_halfslash], swipe_down: "/", swipe_up: function_keyboard_undo }
-      - { click: x, width: 20, label: X   C, long_click: [X, commit_x, commit_c,  C,  "*",  "!"], swipe_left: x, swipe_right: c, swipe_down: send_exclamation, swipe_up: "*" }
-      - { click: v, width: 20, label: V   B, long_click: [V, commit_v, commit_b,  B,  ":",  "?"], swipe_left: v, swipe_right: b, swipe_down: send_question, swipe_up: send_colon }
-      - { click: n, width: 20, label: N   M, long_click: [N, commit_n, commit_m,  M,  ";", commit_equal], swipe_left: n, swipe_right: m, swipe_down: "=", swipe_up: send_semicolon }
+      - { click: z, width: 10, label: Z, long_click: [commit_z, commit_Z, "`", "/"], swipe_down: "/", swipe_up: function_keyboard_undo }
+      - { click: x, width: 20, label: X   C, long_click: ["*", X, commit_x, commit_c, C, "!"], swipe_left: x, swipe_right: c, swipe_down: send_exclamation, swipe_up: "*" }
+      - { click: v, width: 20, label: V   B, long_click: [":", V, commit_v, commit_b, B, "?"], swipe_left: v, swipe_right: b, swipe_down: send_question, swipe_up: send_colon }
+      - { click: n, width: 20, label: N   M, long_click: [";", N, commit_n, commit_m, M, commit_equal], swipe_left: n, swipe_right: m, swipe_down: "=", swipe_up: send_semicolon }
       - { click: backspace, width: 20, name: backspace, preview: false, swipe_down: function_keyboard_redo, swipe_up: function_rime_clear}
   ### 第4行
       - { click: eisu_toggle_符_symbols, width: 14, name: symbol, preview: false }
@@ -227,30 +260,30 @@ preset_keyboards:
     ] }
     keys:
   ### 第1行
-      - { click: q, width: 13, label: Q    W, long_click: [Q, commit_q,  1, commit_w,  W], swipe_left: q, swipe_right: w, swipe_down: 1, swipe_up: function_keyboard_cut }
-      - { click: e, width: 13, label: E    R, long_click: [E, commit_e,  2, commit_r,  R], swipe_left: e, swipe_right: r, swipe_down: 2, swipe_up: function_keyboard_copy }
-      - { click: t, width: 13, label: T    Y, long_click: [T, commit_t,  3, commit_y,  Y], swipe_left: t, swipe_right: y, swipe_down: 3, swipe_up: function_keyboard_paste }
+      - { click: q, width: 13, label: Q    W, long_click: [commit_q, Q, commit_w, W, 1], swipe_left: q, swipe_right: w, swipe_down: 1, swipe_up: function_keyboard_cut }
+      - { click: e, width: 13, label: E    R, long_click: [E, commit_e, commit_r, R, 2], swipe_left: e, swipe_right: r, swipe_down: 2, swipe_up: function_keyboard_copy }
+      - { click: t, width: 13, label: T    Y, long_click: [T, commit_t, commit_y, Y, 3], swipe_left: t, swipe_right: y, swipe_down: 3, swipe_up: function_keyboard_paste }
       - { width: 22 }
-      - { click: t, width: 13, label: T    Y, long_click: [T, commit_t,  3, commit_y,  Y], swipe_left: t, swipe_right: y, swipe_down: 3, swipe_up: function_keyboard_paste }
-      - { click: u, width: 13, label: U    I, long_click: [U, commit_u,  4, commit_i,  I], swipe_left: u, swipe_right: i, swipe_down: 4, swipe_up: function_keyboard_selectAll }
-      - { click: o, width: 13, label: O    P, long_click: [O, commit_o,  5, commit_p,  P,  "清空"], swipe_left: o, swipe_right: p, swipe_down: 5, swipe_up: clear_all_assoc }
+      - { click: t, width: 13, label: T    Y, long_click: [T, commit_t, commit_y, Y, 3], swipe_left: t, swipe_right: y, swipe_down: 3, swipe_up: function_keyboard_paste }
+      - { click: u, width: 13, label: U    I, long_click: [U, commit_u, commit_i, I, 4], swipe_left: u, swipe_right: i, swipe_down: 4, swipe_up: function_keyboard_selectAll }
+      - { click: o, width: 13, label: O    P, long_click: [O, commit_o, P, 5, commit_p], swipe_left: o, swipe_right: p, swipe_down: 5, swipe_up: clear_all_assoc }
   ### 第2行
-      - { click: a, width: 13, label: A    S, long_click: [A, commit_a,  6, commit_s,  S,  "%"], swipe_left: a, swipe_right: s, swipe_down: 6, swipe_up: "%" }
+      - { click: a, width: 13, label: A    S, long_click: [commit_a, A, "%", commit_s, S, 6], swipe_left: a, swipe_right: s, swipe_down: 6, swipe_up: "%" }
       - { click: d, width: 13, label: D    F, long_click: [D, commit_d,  7, commit_f,  F, commit_halfat], swipe_left: d, swipe_right: f, swipe_down: 7, swipe_up: "@" }
-      - { click: g, width: 13, label: G    H, long_click: [G, commit_g,  8, commit_h,  H,  "#"], swipe_left: g, swipe_right: h, swipe_down: 8, swipe_up: "#" }
+      - { click: g, width: 13, label: G    H, long_click: ["#", G, commit_g, commit_h, H, 8], swipe_left: g, swipe_right: h, swipe_down: 8, swipe_up: "#" }
       - { width: 22 }
-      - { click: g, width: 13, label: G    H, long_click: [G, commit_g,  8, commit_h,  H,  "#"], swipe_left: g, swipe_right: h, swipe_down: 8, swipe_up: "#" }
-      - { click: j, width: 13, label: J    K, long_click: [J, commit_j,  9, commit_k,  K,  "“”"], swipe_left: j, swipe_right: k, swipe_down: 9, swipe_up: pair_fullquote }
+      - { click: g, width: 13, label: G    H, long_click: ["#", G, commit_g, commit_h, H, 8], swipe_left: g, swipe_right: h, swipe_down: 8, swipe_up: "#" }
+      - { click: j, width: 13, label: J    K, long_click: ["“”", J, commit_j, commit_k, K, 9], swipe_left: j, swipe_right: k, swipe_down: 9, swipe_up: pair_fullquote }
       # ★ 横屏 L 上滑 = （）与竖屏统一（pair_bracket：一次出一对（）+ 光标居中，非交替配对）。
-      - { click: l, width: 13, label: L, long_click: [commit_l,  0,  L,  "（）"], swipe_down: 0, swipe_up: pair_bracket }
+      - { click: l, width: 13, label: L, long_click: ["（）", L, 0, commit_l], swipe_down: 0, swipe_up: pair_bracket }
   ### 第3行
       - { click: shift, width: 6.5, has_menu: text_delimiter, name: shift, preview: false }
-      - { click: z, width: 6.5, label: Z, long_click: [commit_z,  Z, commit_halfslash], swipe_down: "/", swipe_up: function_keyboard_undo }
-      - { click: x, width: 13, label: X    C, long_click: [X, commit_x, commit_c,  C,  "*",  "!"], swipe_left: x, swipe_right: c, swipe_down: send_exclamation, swipe_up: "*" }
-      - { click: v, width: 13, label: V    B, long_click: [V, commit_v, commit_b,  B,  ":",  "?"], swipe_left: v, swipe_right: b, swipe_down: send_question, swipe_up: send_colon }
+      - { click: z, width: 6.5, label: Z, long_click: [commit_z, commit_Z, "`", "/"], swipe_down: "/", swipe_up: function_keyboard_undo }
+      - { click: x, width: 13, label: X    C, long_click: ["*", X, commit_x, commit_c, C, "!"], swipe_left: x, swipe_right: c, swipe_down: send_exclamation, swipe_up: "*" }
+      - { click: v, width: 13, label: V    B, long_click: [":", V, commit_v, commit_b, B, "?"], swipe_left: v, swipe_right: b, swipe_down: send_question, swipe_up: send_colon }
       - { width: 22 }
-      - { click: v, width: 13, label: V    B, long_click: [V, commit_v, commit_b,  B,  ":",  "?"], swipe_left: v, swipe_right: b, swipe_down: send_question, swipe_up: send_colon }
-      - { click: n, width: 13, label: N    M, long_click: [N, commit_n, commit_m,  M,  ";", commit_equal], swipe_left: n, swipe_right: m, swipe_down: "=", swipe_up: send_semicolon }
+      - { click: v, width: 13, label: V    B, long_click: [":", V, commit_v, commit_b, B, "?"], swipe_left: v, swipe_right: b, swipe_down: send_question, swipe_up: send_colon }
+      - { click: n, width: 13, label: N    M, long_click: [";", N, commit_n, commit_m, M, commit_equal], swipe_left: n, swipe_right: m, swipe_down: "=", swipe_up: send_semicolon }
       - { click: backspace, width: 13, name: backspace, preview: false, swipe_down: function_keyboard_redo, swipe_up: function_rime_clear}
   ### 第4行
       - { click: eisu_toggle_符_symbols_land, width: 12, name: symbol, preview: false }
@@ -288,38 +321,38 @@ preset_keyboards:
     ] }
     keys:
   ### 第1行
-      - { click: q, long_click: [commit_q,  1,  Q], swipe_up: commit_1 }
-      - { click: w, long_click: [commit_w,  2,  W], swipe_up: commit_2 }
-      - { click: e, long_click: [commit_e,  3,  E], swipe_up: commit_3 }
-      - { click: r, long_click: [commit_r,  4,  R], swipe_up: commit_4 }
-      - { click: t, long_click: [commit_t,  5,  T], swipe_up: commit_5 }
-      - { click: y, long_click: [commit_y,  6,  Y], swipe_up: commit_6 }
-      - { click: u, long_click: [commit_u,  7,  U], swipe_up: commit_7 }
-      - { click: i, long_click: [commit_i,  8,  I], swipe_up: commit_8 }
-      - { click: o, long_click: [commit_o,  9,  O], swipe_up: commit_9 }
-      - { click: p, long_click: [commit_p,  0,  P], swipe_up: commit_0 }
+      - { click: q, long_click: [Q, commit_q, 1], swipe_up: commit_1 }
+      - { click: w, long_click: [commit_w, W, 2], swipe_up: commit_2 }
+      - { click: e, long_click: [commit_e, E, 3], swipe_up: commit_3 }
+      - { click: r, long_click: [commit_r, R, 4], swipe_up: commit_4 }
+      - { click: t, long_click: [commit_t, T, 5], swipe_up: commit_5 }
+      - { click: y, long_click: [commit_y, Y, 6], swipe_up: commit_6 }
+      - { click: u, long_click: [commit_u, U, 7], swipe_up: commit_7 }
+      - { click: i, long_click: [commit_i, I, 8], swipe_up: commit_8 }
+      - { click: o, long_click: [commit_o, O, 9], swipe_up: commit_9 }
+      - { click: p, long_click: [commit_p, 0, P], swipe_up: commit_0 }
       - { width: 5 }
   ### 第2行
-      - { click: a, long_click: [commit_a,  A, commit_equal], swipe_up: function_keyboard_selectAll, swipe_down: send_equal }
-      - { click: s, long_click: [commit_s,  S,  ";"], swipe_down: commit_halfsemicolon }
-      - { click: d, long_click: [commit_d,  ":",  D], swipe_down: commit_halfcolon }
-      - { click: f, long_click: [commit_f,  F,  "_"], swipe_down: commit_halfunderline }
-      - { click: g, long_click: [commit_g,  G,  "~"], swipe_down: commit_half_tilde }
-      - { click: h, long_click: [commit_h,  H,  "("], swipe_down: down_halfbracket }
-      - { click: j, long_click: [commit_j,  J,  "<>"], swipe_down: down_angledbracket }
-      - { click: k, long_click: [commit_k,  K,  "\"\""], swipe_down: down_halfquotationmark }
-      - { click: l, long_click: [commit_l,  L,  "''"], swipe_down: down_halfsemiquotationmark }
+      - { click: a, long_click: [commit_a, A, commit_equal], swipe_up: function_keyboard_selectAll, swipe_down: send_equal }
+      - { click: s, long_click: [commit_s, S, ";"], swipe_down: commit_halfsemicolon }
+      - { click: d, long_click: [commit_d, D, ":"], swipe_down: commit_halfcolon }
+      - { click: f, long_click: [commit_f, F, "_"], swipe_down: commit_halfunderline }
+      - { click: g, long_click: [commit_g, G, "~"], swipe_down: commit_half_tilde }
+      - { click: h, long_click: [commit_h, H, "("], swipe_down: down_halfbracket }
+      - { click: j, long_click: [commit_j, J, "<>"], swipe_down: down_angledbracket }
+      - { click: k, long_click: [commit_k, K, "\"\""], swipe_down: down_halfquotationmark }
+      - { click: l, long_click: [commit_l, L, "''"], swipe_down: down_halfsemiquotationmark }
       - { width: 5 }
   ### 第3行
       - { click: shift, width: 14, name: shift, preview: false }
       - { width: 1 }
-      - { click: z, long_click: [commit_z,  Z, commit_halfslash], swipe_up: function_keyboard_undo, swipe_down: send_halfslash }
-      - { click: x, long_click: [commit_x,  X,  "*"], swipe_up: function_keyboard_cut, swipe_down: send_asterisk }
-      - { click: c, long_click: [commit_c,  "#",  C], swipe_up: function_keyboard_copy, swipe_down: send_halfpoundsign }
-      - { click: v, long_click: [commit_v,  V,  "%"], swipe_up: function_keyboard_paste, swipe_down: send_percent }
-      - { click: b, long_click: [commit_b,  B, commit_halfat,  "清空"], swipe_up: clear_all_assoc, swipe_down: commit_halfat }
-      - { click: n, long_click: [commit_n,  N,  "?"], swipe_down: commit_half_questionmark }
-      - { click: m, long_click: [commit_m,  M,  "!"], swipe_down: commit_bjgth }
+      - { click: z, long_click: [commit_z, commit_Z, "/"], swipe_up: function_keyboard_undo, swipe_down: send_halfslash }
+      - { click: x, long_click: [commit_x, X, "*"], swipe_up: function_keyboard_cut, swipe_down: send_asterisk }
+      - { click: c, long_click: [commit_c, C, "#"], swipe_up: function_keyboard_copy, swipe_down: send_halfpoundsign }
+      - { click: v, long_click: [commit_v, V, "%"], swipe_up: function_keyboard_paste, swipe_down: send_percent }
+      - { click: b, long_click: [commit_b, B, commit_halfat], swipe_up: clear_all_assoc, swipe_down: commit_halfat }
+      - { click: n, long_click: [commit_n, N, "?"], swipe_down: commit_half_questionmark }
+      - { click: m, long_click: [commit_m, M, "!"], swipe_down: commit_bjgth }
       - { width: 1 }
       - { click: backspace, width: 14, name: backspace, swipe_down: function_keyboard_redo, swipe_up: function_rime_clear, preview: false }
   ### 第4行
@@ -361,42 +394,42 @@ preset_keyboards:
     ] }
     keys:
   ### 第1行
-      - { click: q, width: 7, long_click: [commit_q,  1,  Q], swipe_up: commit_1 }
-      - { click: w, width: 7, long_click: [commit_w,  2,  W], swipe_up: commit_2 }
-      - { click: e, width: 7, long_click: [commit_e,  3,  E], swipe_up: commit_3 }
-      - { click: r, width: 7, long_click: [commit_r,  4,  R], swipe_up: commit_4 }
-      - { click: t, width: 7, long_click: [commit_t,  5,  T], swipe_up: commit_5 }
+      - { click: q, width: 7, long_click: [Q, commit_q, 1], swipe_up: commit_1 }
+      - { click: w, width: 7, long_click: [commit_w, W, 2], swipe_up: commit_2 }
+      - { click: e, width: 7, long_click: [commit_e, E, 3], swipe_up: commit_3 }
+      - { click: r, width: 7, long_click: [commit_r, R, 4], swipe_up: commit_4 }
+      - { click: t, width: 7, long_click: [commit_t, T, 5], swipe_up: commit_5 }
       - { width: 30 }
-      - { click: y, width: 7, long_click: [commit_y,  6,  Y], swipe_up: commit_6 }
-      - { click: u, width: 7, long_click: [commit_u,  7,  U], swipe_up: commit_7 }
-      - { click: i, width: 7, long_click: [commit_i,  8,  I], swipe_up: commit_8 }
-      - { click: o, width: 7, long_click: [commit_o,  9,  O], swipe_up: commit_9 }
-      - { click: p, width: 7, long_click: [commit_p,  0,  P], swipe_up: commit_0 }
+      - { click: y, width: 7, long_click: [commit_y, Y, 6], swipe_up: commit_6 }
+      - { click: u, width: 7, long_click: [commit_u, U, 7], swipe_up: commit_7 }
+      - { click: i, width: 7, long_click: [commit_i, I, 8], swipe_up: commit_8 }
+      - { click: o, width: 7, long_click: [commit_o, O, 9], swipe_up: commit_9 }
+      - { click: p, width: 7, long_click: [commit_p, 0, P], swipe_up: commit_0 }
   ### 第2行
       - { width: 2 }
-      - { click: a, width: 7, long_click: [commit_a,  A, commit_equal], swipe_up: function_keyboard_selectAll, swipe_down: send_equal }
-      - { click: s, width: 7, long_click: [commit_s,  S,  ";"], swipe_down: commit_halfsemicolon }
-      - { click: d, width: 7, long_click: [commit_d,  ":",  D], swipe_down: commit_halfcolon }
-      - { click: f, width: 7, long_click: [commit_f,  F,  "_"], swipe_down: commit_halfunderline }
-      - { click: g, width: 7, long_click: [commit_g,  G,  "~"], swipe_down: commit_half_tilde }
+      - { click: a, width: 7, long_click: [commit_a, A, commit_equal], swipe_up: function_keyboard_selectAll, swipe_down: send_equal }
+      - { click: s, width: 7, long_click: [commit_s, S, ";"], swipe_down: commit_halfsemicolon }
+      - { click: d, width: 7, long_click: [commit_d, D, ":"], swipe_down: commit_halfcolon }
+      - { click: f, width: 7, long_click: [commit_f, F, "_"], swipe_down: commit_halfunderline }
+      - { click: g, width: 7, long_click: [commit_g, G, "~"], swipe_down: commit_half_tilde }
       - { width: 26 }
-      - { click: g, width: 7, long_click: [commit_g,  G,  "~"], swipe_down: commit_half_tilde }
-      - { click: h, width: 7, long_click: [commit_h,  H,  "("], swipe_down: down_halfbracket }
-      - { click: j, width: 7, long_click: [commit_j,  J,  "<>"], swipe_down: down_angledbracket }
-      - { click: k, width: 7, long_click: [commit_k,  K,  "\"\""], swipe_down: down_halfquotationmark }
-      - { click: l, width: 7, long_click: [commit_l,  L,  "''"], swipe_down: down_halfsemiquotationmark }
+      - { click: g, width: 7, long_click: [commit_g, G, "~"], swipe_down: commit_half_tilde }
+      - { click: h, width: 7, long_click: [commit_h, H, "("], swipe_down: down_halfbracket }
+      - { click: j, width: 7, long_click: [commit_j, J, "<>"], swipe_down: down_angledbracket }
+      - { click: k, width: 7, long_click: [commit_k, K, "\"\""], swipe_down: down_halfquotationmark }
+      - { click: l, width: 7, long_click: [commit_l, L, "''"], swipe_down: down_halfsemiquotationmark }
       - { width: 2 }
   ### 第3行
       - { click: shift, width: 11, name: shift, preview: false }
-      - { click: z, width: 7, long_click: [commit_z,  Z, commit_halfslash], swipe_up: function_keyboard_undo, swipe_down: send_halfslash }
-      - { click: x, width: 7, long_click: [commit_x,  X,  "*"], swipe_up: function_keyboard_cut, swipe_down: send_asterisk }
-      - { click: c, width: 7, long_click: [commit_c,  "#",  C], swipe_up: function_keyboard_copy, swipe_down: send_halfpoundsign }
-      - { click: v, width: 7, long_click: [commit_v,  V,  "%"], swipe_up: function_keyboard_paste, swipe_down: send_percent }
+      - { click: z, width: 7, long_click: [commit_z, commit_Z, "/"], swipe_up: function_keyboard_undo, swipe_down: send_halfslash }
+      - { click: x, width: 7, long_click: [commit_x, X, "*"], swipe_up: function_keyboard_cut, swipe_down: send_asterisk }
+      - { click: c, width: 7, long_click: [commit_c, C, "#"], swipe_up: function_keyboard_copy, swipe_down: send_halfpoundsign }
+      - { click: v, width: 7, long_click: [commit_v, V, "%"], swipe_up: function_keyboard_paste, swipe_down: send_percent }
       - { width: 22 }
-      - { click: v, width: 7, long_click: [commit_v,  V,  "%"], swipe_up: function_keyboard_paste, swipe_down: send_percent }
-      - { click: b, width: 7, long_click: [commit_b,  B, commit_halfat,  "清空"], swipe_up: clear_all_assoc, swipe_down: commit_halfat }
-      - { click: n, width: 7, long_click: [commit_n,  N,  "?"], swipe_down: commit_half_questionmark }
-      - { click: m, width: 7, long_click: [commit_m,  M,  "!"], swipe_down: commit_bjgth }
+      - { click: v, width: 7, long_click: [commit_v, V, "%"], swipe_up: function_keyboard_paste, swipe_down: send_percent }
+      - { click: b, width: 7, long_click: [commit_b, B, commit_halfat], swipe_up: clear_all_assoc, swipe_down: commit_halfat }
+      - { click: n, width: 7, long_click: [commit_n, N, "?"], swipe_down: commit_half_questionmark }
+      - { click: m, width: 7, long_click: [commit_m, M, "!"], swipe_down: commit_bjgth }
       - { click: backspace, width: 11, name: backspace, swipe_down: function_keyboard_redo, swipe_up: function_rime_clear, preview: false }
   ### 第4行
       - { click: eisu_toggle_符_symbols_land, width: 12, name: symbol, preview: false }
@@ -792,25 +825,25 @@ preset_keyboards:
     ] }
     keys:
   ### 第1行
-      - { click: q, width: 20, label: Q   W, long_click: [Q, commit_q,  1, commit_w,  W], swipe_left: q, swipe_right: w, swipe_down: 1, swipe_up: function_keyboard_cut }
-      - { click: e, width: 20, label: E   R, long_click: [E, commit_e,  2, commit_r,  R], swipe_left: e, swipe_right: r, swipe_down: 2, swipe_up: function_keyboard_copy }
-      - { click: t, width: 20, label: T   Y, long_click: [T, commit_t,  3, commit_y,  Y], swipe_left: t, swipe_right: y, swipe_down: 3, swipe_up: function_keyboard_paste }
-      - { click: u, width: 20, label: U   I, long_click: [U, commit_u,  4, commit_i,  I], swipe_left: u, swipe_right: i, swipe_down: 4, swipe_up: function_keyboard_selectAll }
-      - { click: o, width: 20, label: O   P, long_click: [O, commit_o,  5, commit_p,  P,  "清空"], swipe_left: o, swipe_right: p, swipe_down: 5, swipe_up: clear_all_assoc }
+      - { click: q, width: 20, label: Q   W, long_click: [commit_q, Q, commit_w, W, 1], swipe_left: q, swipe_right: w, swipe_down: 1, swipe_up: function_keyboard_cut }
+      - { click: e, width: 20, label: E   R, long_click: [E, commit_e, commit_r, R, 2], swipe_left: e, swipe_right: r, swipe_down: 2, swipe_up: function_keyboard_copy }
+      - { click: t, width: 20, label: T   Y, long_click: [T, commit_t, commit_y, Y, 3], swipe_left: t, swipe_right: y, swipe_down: 3, swipe_up: function_keyboard_paste }
+      - { click: u, width: 20, label: U   I, long_click: [U, commit_u, commit_i, I, 4], swipe_left: u, swipe_right: i, swipe_down: 4, swipe_up: function_keyboard_selectAll }
+      - { click: o, width: 20, label: O   P, long_click: [O, commit_o, P, 5, commit_p], swipe_left: o, swipe_right: p, swipe_down: 5, swipe_up: clear_all_assoc }
   ### 第2行
-      - { click: a, width: 20, label: A   S, long_click: [A, commit_a,  6, commit_s,  S,  "%"], swipe_left: a, swipe_right: s, swipe_down: 6, swipe_up: "%" }
+      - { click: a, width: 20, label: A   S, long_click: [commit_a, A, "%", commit_s, S, 6], swipe_left: a, swipe_right: s, swipe_down: 6, swipe_up: "%" }
       - { click: d, width: 20, label: D   F, long_click: [D, commit_d,  7, commit_f,  F, commit_halfat], swipe_left: d, swipe_right: f, swipe_down: 7, swipe_up: "@" }
-      - { click: g, width: 20, label: G   H, long_click: [G, commit_g,  8, commit_h,  H,  "#"], swipe_left: g, swipe_right: h, swipe_down: 8, swipe_up: "#" }
-      - { click: j, width: 20, label: J   K, long_click: [J, commit_j,  9, commit_k,  K,  "“”"], swipe_left: j, swipe_right: k, swipe_down: 9, swipe_up: pair_fullquote }
+      - { click: g, width: 20, label: G   H, long_click: ["#", G, commit_g, commit_h, H, 8], swipe_left: g, swipe_right: h, swipe_down: 8, swipe_up: "#" }
+      - { click: j, width: 20, label: J   K, long_click: ["“”", J, commit_j, commit_k, K, 9], swipe_left: j, swipe_right: k, swipe_down: 9, swipe_up: pair_fullquote }
       # ★ pair_bracket：一次出一对（）+ 光标居中（text 直插 + function_rime_clear，不顶候选；
       #   机制见本文件上部定义段）。横竖屏 L 上滑统一为（）。
-      - { click: l, width: 20, label: L, long_click: [commit_l,  0,  L,  "（）"], swipe_down: 0, swipe_up: pair_bracket }
+      - { click: l, width: 20, label: L, long_click: ["（）", L, 0, commit_l], swipe_down: 0, swipe_up: pair_bracket }
   ### 第3行
       - { click: shift, width: 10, has_menu: text_delimiter, name: shift, preview: false }
-      - { click: z, width: 10, label: Z, long_click: [commit_z,  Z, commit_halfslash], swipe_down: "/", swipe_up: function_keyboard_undo }
-      - { click: x, width: 20, label: X   C, long_click: [X, commit_x, commit_c,  C,  "*",  "!"], swipe_left: x, swipe_right: c, swipe_down: send_exclamation, swipe_up: "*" }
-      - { click: v, width: 20, label: V   B, long_click: [V, commit_v, commit_b,  B,  ":",  "?"], swipe_left: v, swipe_right: b, swipe_down: send_question, swipe_up: send_colon }
-      - { click: n, width: 20, label: N   M, long_click: [N, commit_n, commit_m,  M,  ";", commit_equal], swipe_left: n, swipe_right: m, swipe_down: "=", swipe_up: send_semicolon }
+      - { click: z, width: 10, label: Z, long_click: [commit_z, commit_Z, "`", "/"], swipe_down: "/", swipe_up: function_keyboard_undo }
+      - { click: x, width: 20, label: X   C, long_click: ["*", X, commit_x, commit_c, C, "!"], swipe_left: x, swipe_right: c, swipe_down: send_exclamation, swipe_up: "*" }
+      - { click: v, width: 20, label: V   B, long_click: [":", V, commit_v, commit_b, B, "?"], swipe_left: v, swipe_right: b, swipe_down: send_question, swipe_up: send_colon }
+      - { click: n, width: 20, label: N   M, long_click: [";", N, commit_n, commit_m, M, commit_equal], swipe_left: n, swipe_right: m, swipe_down: "=", swipe_up: send_semicolon }
       - { click: backspace, width: 20, name: backspace, preview: false, swipe_down: function_keyboard_redo, swipe_up: function_rime_clear}
   ### 第4行
       - { click: eisu_toggle_符_symbols, width: 14, name: symbol, preview: false }
@@ -847,38 +880,38 @@ preset_keyboards:
     ] }
     keys:
   ### 第1行
-      - { click: q, long_click: [commit_q,  1,  Q], swipe_up: commit_1 }
-      - { click: w, long_click: [commit_w,  2,  W], swipe_up: commit_2 }
-      - { click: e, long_click: [commit_e,  3,  E], swipe_up: commit_3 }
-      - { click: r, long_click: [commit_r,  4,  R], swipe_up: commit_4 }
-      - { click: t, long_click: [commit_t,  5,  T], swipe_up: commit_5 }
-      - { click: y, long_click: [commit_y,  6,  Y], swipe_up: commit_6 }
-      - { click: u, long_click: [commit_u,  7,  U], swipe_up: commit_7 }
-      - { click: i, long_click: [commit_i,  8,  I], swipe_up: commit_8 }
-      - { click: o, long_click: [commit_o,  9,  O], swipe_up: commit_9 }
-      - { click: p, long_click: [commit_p,  0,  P], swipe_up: commit_0 }
+      - { click: q, long_click: [Q, commit_q, 1], swipe_up: commit_1 }
+      - { click: w, long_click: [commit_w, W, 2], swipe_up: commit_2 }
+      - { click: e, long_click: [commit_e, E, 3], swipe_up: commit_3 }
+      - { click: r, long_click: [commit_r, R, 4], swipe_up: commit_4 }
+      - { click: t, long_click: [commit_t, T, 5], swipe_up: commit_5 }
+      - { click: y, long_click: [commit_y, Y, 6], swipe_up: commit_6 }
+      - { click: u, long_click: [commit_u, U, 7], swipe_up: commit_7 }
+      - { click: i, long_click: [commit_i, I, 8], swipe_up: commit_8 }
+      - { click: o, long_click: [commit_o, O, 9], swipe_up: commit_9 }
+      - { click: p, long_click: [commit_p, 0, P], swipe_up: commit_0 }
       - { width: 5 }
   ### 第2行
-      - { click: a, long_click: [commit_a,  A, commit_equal], swipe_up: function_keyboard_selectAll, swipe_down: send_equal }
-      - { click: s, long_click: [commit_s,  S,  ";"], swipe_down: commit_halfsemicolon }
-      - { click: d, long_click: [commit_d,  ":",  D], swipe_down: commit_halfcolon }
-      - { click: f, long_click: [commit_f,  F,  "_"], swipe_down: commit_halfunderline }
-      - { click: g, long_click: [commit_g,  G,  "~"], swipe_down: commit_half_tilde }
-      - { click: h, long_click: [commit_h,  H,  "("], swipe_down: down_halfbracket }
-      - { click: j, long_click: [commit_j,  J,  "<>"], swipe_down: down_angledbracket }
-      - { click: k, long_click: [commit_k,  K,  "\"\""], swipe_down: down_halfquotationmark }
-      - { click: l, long_click: [commit_l,  L,  "''"], swipe_down: down_halfsemiquotationmark }
+      - { click: a, long_click: [commit_a, A, commit_equal], swipe_up: function_keyboard_selectAll, swipe_down: send_equal }
+      - { click: s, long_click: [commit_s, S, ";"], swipe_down: commit_halfsemicolon }
+      - { click: d, long_click: [commit_d, D, ":"], swipe_down: commit_halfcolon }
+      - { click: f, long_click: [commit_f, F, "_"], swipe_down: commit_halfunderline }
+      - { click: g, long_click: [commit_g, G, "~"], swipe_down: commit_half_tilde }
+      - { click: h, long_click: [commit_h, H, "("], swipe_down: down_halfbracket }
+      - { click: j, long_click: [commit_j, J, "<>"], swipe_down: down_angledbracket }
+      - { click: k, long_click: [commit_k, K, "\"\""], swipe_down: down_halfquotationmark }
+      - { click: l, long_click: [commit_l, L, "''"], swipe_down: down_halfsemiquotationmark }
       - { width: 5 }
   ### 第3行
       - { click: shift, width: 14, name: shift, preview: false }
       - { width: 1 }
-      - { click: z, long_click: [commit_z,  Z, commit_halfslash], swipe_up: function_keyboard_undo, swipe_down: send_halfslash }
-      - { click: x, long_click: [commit_x,  X,  "*"], swipe_up: function_keyboard_cut, swipe_down: send_asterisk }
-      - { click: c, long_click: [commit_c,  "#",  C], swipe_up: function_keyboard_copy, swipe_down: send_halfpoundsign }
-      - { click: v, long_click: [commit_v,  V,  "%"], swipe_up: function_keyboard_paste, swipe_down: send_percent }
-      - { click: b, long_click: [commit_b,  B, commit_halfat,  "清空"], swipe_up: clear_all_assoc, swipe_down: commit_halfat }
-      - { click: n, long_click: [commit_n,  N,  "?"], swipe_down: commit_half_questionmark }
-      - { click: m, long_click: [commit_m,  M,  "!"], swipe_down: commit_bjgth }
+      - { click: z, long_click: [commit_z, commit_Z, "/"], swipe_up: function_keyboard_undo, swipe_down: send_halfslash }
+      - { click: x, long_click: [commit_x, X, "*"], swipe_up: function_keyboard_cut, swipe_down: send_asterisk }
+      - { click: c, long_click: [commit_c, C, "#"], swipe_up: function_keyboard_copy, swipe_down: send_halfpoundsign }
+      - { click: v, long_click: [commit_v, V, "%"], swipe_up: function_keyboard_paste, swipe_down: send_percent }
+      - { click: b, long_click: [commit_b, B, commit_halfat], swipe_up: clear_all_assoc, swipe_down: commit_halfat }
+      - { click: n, long_click: [commit_n, N, "?"], swipe_down: commit_half_questionmark }
+      - { click: m, long_click: [commit_m, M, "!"], swipe_down: commit_bjgth }
       - { width: 1 }
       - { click: backspace, width: 14, name: backspace, swipe_down: function_keyboard_redo, swipe_up: function_rime_clear, preview: false }
   ### 第4行
