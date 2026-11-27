@@ -34,7 +34,7 @@ installation.yaml
 .space_update_stamp
 
 # ── 死代码（统计实际走 input_statistics.lua）──
-**/lua/input_stats_ly_*.lua
+**/lua/input_stats_*.lua
 sequence_*.txt
 
 # ── space 根目录手机自带文件（非方案本体）──
@@ -77,3 +77,7 @@ sequence_*.txt
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ── 本机资产（不随仓库分发）──
+**/*.custom.yaml
+**/preview_*.png

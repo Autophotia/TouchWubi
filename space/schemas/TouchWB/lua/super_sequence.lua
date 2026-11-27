@@ -22,15 +22,38 @@
 --   Ctrl+P  置顶当前高亮候选
 --
 -- 【移动端数字键】（Trime / Hamster 等，需启用下滑数字）
---   数字键 2-9  前移对应序号的候选（例如 3 将第3候选前移一位）
---   数字键 0    前移第10候选
---   数字键 1    撤销上次调序操作（仅对当前编码有效）
+--   数字键 1-9  后移对应序号的候选（例如 1 将第1候选后移一位、2 将第2候选后移一位）
+--   数字键 0    撤销本次调序：位置回到本轮起点，并**删除**这次写下的记录
+--               （本轮之前若已有旧记录则还原成旧值）。只对当前编码有效。
+--               ★ 撤销不是「往回调一格」：连按 1、2、3 算一轮，按 0 一步回到原点。
+--               ★ 必须真删而不是「写一条目标位置」：后者会把这个词永久钉在某个位置，
+--                 之后自动调频再想提它就提不动（真机实测：连打 4 次纹丝不动），
+--                 用户会误判成「自动调频坏了」。删完立即 force 同步备份，防导出死锁。
+--
+--   ★ 2026-11-27 由「前移」改为「后移」，理由（用户实测场景驱动）：
+--     自动调频会把常用词直接顶到第 1 位，手动的主要工作是「把它压下去」。
+--     前移模型下第 1 位是边界（按 1 没有「第 0 位」），压不下去，只能按 2/3/4/5
+--     去推后面四个词 —— 四次按键落到四个不同的词上，于是写 4 条「别人」的绝对
+--     位置记录（如 1→1、2→2、3→3、4→4），P 自己反而一条都没有。这 4 条会永久
+--     钉住前四位，之后自动调频再想提拔新词就被压回后面。
+--     后移模型下按 1/2/3/4，四次按键落到的**始终是 P 自己**，同一个键被覆盖，
+--     最后只剩 1 条 P→N，其余候选不产生任何记录。
+--   ⚠ 代价：移动端不再有「把词往前挪」的键（数字键只有 1-9 + 0，0 给了撤销，
+--     只能服务一个方向）。提升由自动调频承担；PC 端 Ctrl+J 不受影响。
 --
 -- 【其他命令】（均仅影响当前方案）
---   /txqk   调序清空（清除所有调序记录，仅清空 userdb，保留备份文件）
---   /txdc   调序导出（导出调序数据至 sequence_<schema_id>.txt，仅当数据库条目数大于备份时允许覆盖）
---   /txdr   调序导入（从 sequence_<schema_id>.txt 恢复调序数据）
---   /txtj   调序统计（查看所有调序记录，按空格上屏）
+--   /txqk   调序清空（清空 userdb 全部记录，含自动调频。备份内容保留，但在头部写入
+--            #/cleared 标记 ⇒ 重启后不会被自动导回；要恢复必须显式 /txdr）
+--   /txdc   调序导出（导出至 sequence_<schema_id>.txt，内容含手动调序 + 自动调频）
+--            ★ 导出保护：备份里有、库里没有的记录（按 码|词 比键）→ 拒绝导出并提示先 /txdr。
+--              备份存在的意义是「重装后恢复」，若允许新快照覆盖掉旧备份里库中没有的记录，
+--              重装后只要先打几个字（自动调频几秒就有记录），旧备份就会被静默抹掉。
+--              /txdr 是合并导入（只补缺），导完再导出，新旧合一。
+--              例外：#/cleared 标记的备份（/txqk 声明作废）、force 调用（清空类操作同步备份）。
+--   /txdr   调序导入（从 txt 合并恢复：只补库中缺的键，手动按时间戳新者胜；
+--            忽略 #/cleared 标记 ⇒ 即「强制恢复」）
+--   /txtj   调序统计（明细只列手动调序记录，按空格上屏；标题同时报「自动 N 条」，
+--            与 /txdc 的「手动 N、自动 M」口径一致 —— 自动调频不进明细，只报条数）
 --
 -- 【自动调频】（第二十轮新增，开关 switches/auto_freq，reset: 1 默认开）
 --   同一编码下**连续**上屏两次的词自动提前（AUTO_FREQ_MIN=2），提前后一直保持在前面，
@@ -38,21 +61,27 @@
 --   ⚠ 第二十二轮修正：早先记的是「累计次数」，于是词一旦参与过调频，之后每上屏一次
 --     计数就 +1，排序值反超对手 ⇒ 变成「单次输入也会顶到第一」。现在改为只在
 --     **连续两次**时才写库，单次输入完全不动数据（详见 af_record 注释）。
---   ⚠⚠ S93 修正（用户实测报告的「轮流抢第一」）：旧实现在「连续两次」达标后，
---     **每一次继续上屏都会把序号刷新成最大**（db:update(key, "T"..max+1)），
---     而读取侧是按序号降序排 ⇒ 谁最后上屏谁第一，两个词互相顶来顶去。
---     现在改为：**首次达标即定序，之后不动**（af_record 里已存在就直接返回 false）。
---     这才符合上面那句设计意图（「直到**别的**词也连续两次」才换位）。
+--   ⚠⚠ 序号语义（S93 → S96 两轮修正后的最终规则，**以此为准**）：
+--     ① 达标（连续 2 次）才写库，单次上屏完全不动数据；
+--     ② 已存在的词**不是一律冻结**，而是「不够高才抬」：抬到本编码当前最高序号 +1；
+--        已经是最高的再上屏则不动（否则退化成「谁最后上屏谁抢第一」）。
+--        ⇒ 既不会两个词轮流抢第一，也保留「重复上屏能真正往前挤」。
+--     历史：S93 曾改成「已存在就 return false」，导致词被永久冻在某个序号、
+--     再打多少次都追不上对手（用户实测「调频坏了」），S96 已改回「不够高才抬」。
+--     实现见 af_record 内「S96 的规则」注释块，勿按 S93 旧注释改代码。
 --   ⚠⚠ S93 同时删掉判据③里 `text = _af_last_text` 的兜底 ——
 --     拿「上一次结算的词」冒充「本次上屏的词」，会给没被上屏的词补计数，
 --     同样表现为莫名其妙的词轮流抢第一。取不到词就不记（宁可漏记，不可记错）。
---   手动调序（Ctrl+J/K/L/P、移动端数字键）始终优先，不会被它覆盖。
+--   ⚠ 手动调序优先：S 里应用的自动提前会被 F 里的手动记录覆盖，
+--     所以被手动调过的词，之后连续上屏也提不动 —— 那不是 bug，是「手动是微调」的代价。
+--     想让它重新受自动支配，用移动端数字键 0 撤销（会真删记录）或 Ctrl+L 复位。
 --   /txzq   调序自动清（清空自动调频记录，手动调序保留）
 --   /txzj   调序自动检（自动调频自检：开关 / 连续次数 / 本码已调频词）
 --
--- 【S93 新增自动调频专项探针】log/af_probe.log
+-- 【自动调频专项探针】log/af_probe.log（AF_PROBE_ON，默认 false，仅排障时开）
 --   只读、不改任何状态。目的是把「点选候选栏 / 空格上屏 / 收起键盘再弹出」
 --   三条路径在日志里彻底分开（此前它们落在同一段代码里，只能靠推测）。
+--   2026-11-27 靠它定位到「提前名额被重复候选占满」的真 bug（见 af_apply 注释）。
 --
 -- 【方案配置说明】
 -- 本脚本包含处理器(P)和过滤器(F、S)，需在 schema.yaml 中添加相应配置：
@@ -133,11 +162,14 @@ local cur_adjust_offset = 0
 ---@type boolean 是否处于 pin 模式
 local in_pin_mode = false
 
----@type integer | nil 数字键置顶的候选索引（1-indexed），nil 表示无待处理置顶
---- 1 = 撤销，2-9/0 = 前移对应候选
+---@type integer | nil 数字键待处理的候选索引（1-indexed），nil 表示无待处理
+--- 0 = 撤销，1-9 = 后移对应候选
 local pin_candidate_index = nil
 
----@type table | nil 上次调序记录 { code, text, from_position }，用于撤销
+---@type table | nil 本轮调序记录，用于撤销
+---  { code, text, origin_position, from_position, prev_to, prev_at }
+---  origin_position：本轮**第一次**按键前的列表位置（撤销回这里，不是最后一步）
+---  prev_to/prev_at：本轮开始前的库值快照；nil 表示本轮之前没有记录（撤销即删除）
 local last_adjustment = nil
 
 ---@type table<string, table> 移动端会话内候选顺序追踪 { [code] = {text1, text2, ...} }
@@ -152,6 +184,17 @@ local current_schema_id = nil
 local _cleared_schemas = {}
 -- 按方案存储的「已导入」标记（懒加载：首次真正读写调序数据时才从 txt 备份导入）
 local _imported = {}
+
+-- ★ 2026-11-27：自动调频记录键前缀上移到此处。
+--   原定义在 ~692 行（自动调频区块），但导出/导入（~469 / ~529）现在要读写自动记录，
+--   而 Lua 的 local 作用域从声明处开始 ⇒ 在 692 行之前引用会被解析成全局 nil，
+--   拼出来的键会变成 "nil..."，静默写坏备份。定义只能有一处，勿在下方重复声明。
+local AF_PREFIX = "\002af|"        -- 记录键前缀（\002 开头 ⇒ 与手动调序互不干扰）
+
+--- 备份文件里每行的类型列。手动行 "M"，自动调频行 "A"，均以 TAB 分隔。
+--- ⚠ 为什么不直接把 \002 写进 txt：控制字符会让文件被工具判成二进制，编辑器里是方块乱码。
+local BACKUP_KIND_MANUAL = "M"
+local BACKUP_KIND_AUTO = "A"
 -- 前置声明（定义在 import_from_file 之后，见下）
 local ensure_imported
 
@@ -368,6 +411,51 @@ local function save_adjustment(code, adjust_key, to_position, timestamp, schema_
     return result
 end
 
+-- 前向声明：clear_code_adjustment 删完记录要立刻同步备份，而 export_to_file 定义在后
+-- （它依赖 read_backup_key_sets 与备份格式常量，不宜前移）。Lua 的 local 作用域从声明处开始，
+-- 不提前声明的话 clear_code_adjustment 里的引用会解析成全局 nil，调用直接报「attempt to call a nil value」。
+local export_to_file
+
+--- 复位某个编码的全部手动调序记录（恢复默认顺序），返回实际清掉的条数。
+--- ★ 2026-11-27 新增，供两处共用，避免同一段逻辑写两遍：
+---   ① Ctrl+L（process_adjustment）：作用于「编码栏里当前这个码」；
+---   ② /txqk<码>（F.func）：作用于命令里指定的码，不必重新打一遍。
+--- 为什么不用 clear_database 那种「收集键 → 退出迭代器 → erase」的写法：
+---   get_adjustment 已把结果读成普通 Lua 表并释放了 db 迭代器（:300 置 nil），
+---   在普通表上循环、再经 save_adjustment 逐条 erase，不存在「迭代器与写入交叠」。
+---   这正是 Ctrl+L 原有的写法，勿改。
+--- 只清手动记录：get_adjustment 内部跳过 \002 开头的自动调频记录（:293），
+---   自动调频另有 /txzq 负责，两者语义互不越界。
+---@param code string 要复位的编码
+---@param schema_id string 方案ID
+---@return integer 清掉的记录条数
+local function clear_code_adjustment(code, schema_id)
+    if not code or code == "" then return 0 end
+
+    local user_adjustment = get_adjustment(code, schema_id)
+    if not user_adjustment then return 0 end
+
+    local n = 0
+    for adjust_key in pairs(user_adjustment) do
+        if save_adjustment(code, adjust_key, nil, nil, schema_id) then
+            n = n + 1
+        end
+    end
+
+    -- ★ 2026-11-27：删除后立刻同步备份（force 覆盖）。
+    --   导出判据已改成「备份里的键必须都在库里」，Ctrl+L 删掉记录后库里就缺了这些键；
+    --   不同步的话下次导出会被判据拦下并提示「先 /txdr 导入」——而 /txdr 又会把刚删的
+    --   原样导回来，等于 Ctrl+L 白做，还会把用户锁进「删了→被拦→导回→再删」的死循环。
+    --   这里是用户显式删除，直接 force 覆盖，与 /txzq 清完自动记录的做法一致。
+    if n > 0 then
+        local db = get_user_db(schema_id)
+        if db and db:loaded() then
+            export_to_file(db, schema_id, true)
+        end
+    end
+    return n
+end
+
 ---从 context 中获取当前排序匹配码
 ---@param context Context
 ---@return string
@@ -387,48 +475,69 @@ end
 --- 统计数据库中有效条目数（排除系统元数据键）
 ---@param db LevelDB
 ---@return integer
-local function count_db_entries(db)
-    if not db or not db:loaded() then return 0 end
-    local accessor = db:query("")
-    if not accessor then return 0 end
-    local count = 0
-    for key, _ in accessor:iter() do
-        -- "\001" = 内部标记；"\002" = 自动调频记录（第二十轮新增，不参与手动调序的导出/统计）
-        if key:sub(1, 1) ~= "\001" and key:sub(1, 1) ~= "\002" then
-            count = count + 1
-        end
-    end
-    accessor = nil
-    return count
-end
+-- ★ 2026-11-27：原先这里有两个按「条数」计数的辅助函数（count_db_entries / count_txt_entries），
+--   服务于旧的「库条目数 <= 备份条目数就拒绝导出」判据。该判据已被 read_backup_key_sets
+--   的「键集合包含关系」取代 —— 条数比不出「备份里有、库里没有」，重装后库一旦有记录就会被放行。
+--   两个函数已无调用者，一并删除，避免以后有人照着它们再写回条数判据。
 
---- 统计备份文件中有效条目数（排除注释行和空行，要求包含 tab 分隔符）
+--- 读取备份文件里的「键集合」，供导出保护判据使用。
+--- ★ 为什么需要它：判据的核心问题不是「库有多少条」，而是「备份里的东西库里有没有」。
+---   重装输入法后，库是空的、备份是满的；如果用户先打了几行字（自动调频几秒就会写记录），
+---   库就不再是空的 —— 按「库为空才拒绝」的判据会直接放行，整份旧备份被新快照覆盖，
+---   「重装后恢复」这个备份唯一的作用当场失效。改比键集合后，缺任何一条都拒绝导出。
+--- ★ 只比键（码|词），不比位置和时间戳：
+---   位置变化是正常演进（自动调频天天在改序号），不算「库里有缺失」。
+--- ★ #/cleared 标记单独返回：那是 /txqk 写下的「这份备份已作废」，覆盖它不算丢失。
 ---@param schema_id string
----@return integer
-local function count_txt_entries(schema_id)
+---@return table {manual: table<string, boolean>, auto: table<string, boolean>, cleared: boolean, count: integer}
+local function read_backup_key_sets(schema_id)
+    local result = { manual = {}, auto = {}, cleared = false, count = 0 }
     local filename = get_export_file_name(schema_id)
-    if not filename then return 0 end
+    if not filename then return result end
+
     local file = io.open(filename, "rb")
-    if not file then return 0 end
+    if not file then return result end
     local content = file:read("*a")
     file:close()
-    if content:sub(1, 3) == "\xef\xbb\xbf" then
-        content = content:sub(4)
-    end
-    local count = 0
+    if content:sub(1, 3) == "\xef\xbb\xbf" then content = content:sub(4) end
+
     for line in content:gmatch("[^\r\n]+") do
-        if line:sub(1, 1) ~= "#" and line:match("\t") then
-            count = count + 1
+        if line:sub(1, 1) == "#" then
+            if line:match("^#/cleared") then result.cleared = true end
+        elseif line ~= "" then
+            -- 新格式首列是类型字母（M / A）+ TAB；v1 旧格式没有类型列，首列直接是 码|词。
+            local kind, key = line:match("^(%a)\t([^\t]+)\t")
+            if kind == BACKUP_KIND_MANUAL then
+                result.manual[key] = true
+                result.count = result.count + 1
+            elseif kind == BACKUP_KIND_AUTO then
+                result.auto[key] = true
+                result.count = result.count + 1
+            else
+                -- ★ 判「kind 不是 M/A」而不是「kind == nil」：v1 的单字母编码行
+                --   （五笔 a = 工、o = 业 等）会被 ^(%a)\t 捕获成 kind="a"，
+                --   若按 kind == nil 分流，这类记录会被静默漏掉，判据就不再保护它们。
+                --   用「首列含 |」认 v1，与 import_from_file 的兼容口径一致。
+                local k = line:match("^([^\t]+)\t")
+                if k and k:find("|", 1, true) then
+                    result.manual[k] = true
+                    result.count = result.count + 1
+                end
+            end
         end
     end
-    return count
+    return result
 end
 
 --- 导出调序数据到文件（返回导出条目数，若失败或被保护拒绝则返回 nil）
 ---@param db LevelDB
 ---@param schema_id string
----@return integer | nil
-local function export_to_file(db, schema_id)
+---@param force boolean|nil 跳过导出保护（清空类操作同步备份时用，那是用户显式删除）
+---@return integer | nil 写入条目数（手动 + 自动）；失败或被保护拒绝返回 nil
+---@return integer | nil 被拒绝时返回「备份里有、库里没有」的条数（供调用方提示先 /txdr）
+-- ★ 不用 local：文件前方（clear_code_adjustment 之前）已有前向声明，这里是对那个 local 赋值，
+--   这样定义在它上面的 clear_code_adjustment 也能调用到它。
+function export_to_file(db, schema_id, force)
     -- 如果 schema_id 为 nil，则跳过导出
     if not schema_id then return nil end
     
@@ -440,28 +549,66 @@ local function export_to_file(db, schema_id)
     local sync_file_name = get_export_file_name(schema_id)
     if not sync_file_name then return nil end
 
-    -- 【导出保护】统计备份文件条目数
-    local txt_entries = count_txt_entries(schema_id)
-
     -- 【关键修复】只查询一次数据库，同时用于统计和写入，避免两次查询之间数据库状态变化
     local da = db:query("")
     if not da then return nil end
 
-    -- 统计数据库条目数（同时收集数据）
-    local db_entries = 0
-    local export_data = {}
+    -- 统计条目数（同时按类型收集数据）
+    -- ★ 2026-11-27：自动调频也进备份。用户要求「整个调序是一个整体」——
+    --   手动调序是在自动调频结果上做的微调，只备份手动等于只备份了半份状态。
+    --   两类记录在库里靠键前缀区分，在备份里靠第一列的类型字母区分：
+    --     手动  M <TAB> <码>|<词> <TAB> <位置> <TAB> <时间戳>
+    --     自动  A <TAB> <码>|<词> <TAB> T<序号>
+    --   自动记录在库里是 "\002af|<码>|<词>"，备份里必须去掉 "\002af|" 前缀：
+    --   控制字符写进文本文件会让工具把整份备份判成二进制。
+    local manual_data = {}
+    local auto_data = {}
     for key, value in da:iter() do
-        -- 只导出手动调序记录："\001" 是内部标记，"\002" 是自动调频（不进备份文件）
-        if key:sub(1, 1) ~= "\001" and key:sub(1, 1) ~= "\002" then
-            db_entries = db_entries + 1
-            table.insert(export_data, {key = key, value = value})
+        local first = key:sub(1, 1)
+        if first == "\002" then
+            -- 只认 AF_PREFIX；其它 \002 键（未来若新增）一律不进备份，避免误读。
+            if key:sub(1, #AF_PREFIX) == AF_PREFIX then
+                auto_data[#auto_data + 1] = { key = key:sub(#AF_PREFIX + 1), value = value }
+            end
+        elseif first ~= "\001" then
+            manual_data[#manual_data + 1] = { key = key, value = value }
         end
     end
     da = nil
 
-    -- 【导出保护】如果备份存在且条目数 >= 数据库条目数，则拒绝覆盖
-    if txt_entries > 0 and db_entries <= txt_entries then
-        return nil
+    local db_entries = #manual_data + #auto_data
+
+    -- 【导出保护】2026-11-27 第二次改判据：从「库为空才拒绝」改成「备份里的键必须都在库里」。
+    --   上一版只挡「库空 + 备份非空」，漏掉了最常见的一种灾难：
+    --   重装输入法后库是空的，用户不会先敲 /txdr，而是直接打字 —— 自动调频几秒就写入几条，
+    --   库立刻不再为空，判据放行，整份旧备份被新快照覆盖。备份存在的唯一意义
+    --   （重装后恢复旧习惯）就这样静默消失了，而且没有任何提示。
+    --   现在只要备份里有任意一条键（码|词）在库里找不到，就拒绝导出并把缺失条数返回给调用方，
+    --   由它提示「先 /txdr 导入」。/txdr 是合并导入（只补缺、时间戳新者胜），
+    --   导入完再导出，新旧数据自然合一，这正是用户要的语义。
+    -- ★ 只比键，不比位置/时间戳：自动调频天天改序号，位置不同是正常演进，不算缺失。
+    -- ★ #/cleared 例外：那是 /txqk 写的「这份备份已作废」，覆盖它不属于丢失
+    --   （用户主动清空；想留旧内容必须在导出前自己 /txdr）。
+    -- ★ force 例外：清空类操作（Ctrl+L 复位、/txzq）同步备份时用，那是用户显式删除，
+    --   若也走判据，会变成「刚删掉就必须先导回来才能导出」的死锁。
+    if not force then
+        local bak = read_backup_key_sets(schema_id)
+        if not bak.cleared and bak.count > 0 then
+            local cur_m, cur_a = {}, {}
+            for _, item in ipairs(manual_data) do cur_m[item.key] = true end
+            for _, item in ipairs(auto_data) do cur_a[item.key] = true end
+
+            local missing = 0
+            for k in pairs(bak.manual) do
+                if not cur_m[k] then missing = missing + 1 end
+            end
+            for k in pairs(bak.auto) do
+                if not cur_a[k] then missing = missing + 1 end
+            end
+            if missing > 0 then
+                return nil, missing
+            end
+        end
     end
 
     -- 开始导出，覆盖旧文件，使用二进制模式确保UTF-8 BOM正确写入
@@ -477,10 +624,13 @@ local function export_to_file(db, schema_id)
     -- 先写入当前用户ID行（使用 # 作为注释前缀，避免控制字符导致二进制识别）
     file:write(string.format("#/user_id\t%s\n", current_username))
 
-    -- 写入收集的数据
-    for _, item in ipairs(export_data) do
-        local line = string.format("%s\t%s\n", item.key, item.value)
-        file:write(line)
+    -- 手动调序行
+    for _, item in ipairs(manual_data) do
+        file:write(string.format("%s\t%s\t%s\n", BACKUP_KIND_MANUAL, item.key, item.value))
+    end
+    -- 自动调频行放在后面：人翻文件时一眼就能看出哪些是自动产生的
+    for _, item in ipairs(auto_data) do
+        file:write(string.format("%s\t%s\t%s\n", BACKUP_KIND_AUTO, item.key, item.value))
     end
 
     file:close()
@@ -488,7 +638,8 @@ local function export_to_file(db, schema_id)
     return db_entries
 end
 
-local function import_from_file(db, schema_id)
+---@param force boolean|nil 忽略备份头部的 #/cleared 标记（/txdr 显式恢复时用）
+local function import_from_file(db, schema_id, force)
     -- 如果 schema_id 为 nil，则跳过导入
     if not schema_id then return false, 0 end
     
@@ -520,6 +671,29 @@ local function import_from_file(db, schema_id)
         content = content:sub(4)
     end
 
+    -- ★ 2026-11-27：导入一开始就宣称「这份备份已处理」，阻断 save_adjustment 内部的
+    --   ensure_imported 再触发一次嵌套导入。
+    --   不阻断会发生什么（真机复现过）：循环写到第 1 条手动记录时调 save_adjustment，
+    --   它内部先 ensure_imported —— 此时 _imported 还是 false，于是整份备份被内层又导一遍，
+    --   内层把后面所有记录都写进库；等回到外层，后续每条 db:fetch 都非空、时间戳又相等，
+    --   全部 goto continue，import_count 停在 1。
+    --   后果：数据是对的（内层补齐），但「成功导入 N 条」严重偏小 ——
+    --   实测 3 手动 + 3 自动 的备份，提示「成功导入 1 条」，用户以为只恢复了一条。
+    _imported[schema_id] = true
+
+    -- ★ 2026-11-27：备份被 /txqk 标记作废 ⇒ 自动导入必须跳过。
+    --   原实现只靠 _cleared_schemas 这个纯 Lua 表，引擎一重启就空了，
+    --   于是「清空」活不过一次重启：下次首次读写调序时又把 txt 里的记录全导回来。
+    --   标记落在备份文件头（#/cleared <时间戳>），跨进程有效。
+    --   /txdr 是用户显式要求恢复，传 force=true 忽略此标记。
+    --   只扫文件头部的注释行：标记一定在最前面，遇到第一条数据行就停。
+    if not force then
+        for line in content:gmatch("[^\r\n]+") do
+            if line:sub(1, 1) ~= "#" then break end
+            if line:match("^#/cleared") then return false, 0 end
+        end
+    end
+
     local import_count = 0
 
     -- 按行分割处理
@@ -529,23 +703,48 @@ local function import_from_file(db, schema_id)
         -- 忽略系统元数据行（注释行以 # 开头）
         if line:sub(1, 1) == "#" then goto continue end
 
-        -- 数据处理逻辑（保持不变）
-        local key, value = string.match(line, "^(.-)\t(.+)$")
-        if key and value then
-            local code, phrase = string.match(key, "^(.+)|(.+)$")
-            if not code or not phrase then goto continue end
+        -- ★ 2026-11-27：备份格式 v2 —— 每行第一列是类型字母（M 手动 / A 自动）。
+        --   旧备份（v1）没有类型列，第一列直接是 "码|词"，按手动记录处理，向后兼容。
+        --   判据用前两个字节：编码都是字母，不会出现 "M<TAB>" / "A<TAB>" 这种形状。
+        local line_kind = BACKUP_KIND_MANUAL
+        local body = line
+        if line:sub(1, 2) == BACKUP_KIND_MANUAL .. "\t" then
+            body = line:sub(3)
+        elseif line:sub(1, 2) == BACKUP_KIND_AUTO .. "\t" then
+            line_kind = BACKUP_KIND_AUTO
+            body = line:sub(3)
+        end
 
-            local info = parse_adjustment_value(value)
-            local exist_value = db:fetch(key)
-            if exist_value then -- 跳过旧的数据
-                local exist_info = parse_adjustment_value(exist_value)
-                if info.updated_at <= exist_info.updated_at then
-                    goto continue
+        if line_kind == BACKUP_KIND_AUTO then
+            -- 自动调频行：A <TAB> <码>|<词> <TAB> T<序号>
+            -- 只在库里没有同键时写入：txt 是旧快照、db 是当前状态，
+            -- 不能让旧备份把当前序号盖回去。
+            local bkey, bval = string.match(body, "^(.-)\t(.+)$")
+            if bkey and bval and string.match(bval, "^T%d+$") then
+                local db_key = AF_PREFIX .. bkey
+                if not db:fetch(db_key) then
+                    local ok = pcall(function() db:update(db_key, bval) end)
+                    if ok then import_count = import_count + 1 end
                 end
             end
+        else
+            local key, value = string.match(body, "^(.-)\t(.+)$")
+            if key and value then
+                local code, phrase = string.match(key, "^(.+)|(.+)$")
+                if not code or not phrase then goto continue end
 
-            import_count = import_count + 1
-            save_adjustment(code, phrase, info.to_position, info.updated_at, schema_id)
+                local info = parse_adjustment_value(value)
+                local exist_value = db:fetch(key)
+                if exist_value then -- 跳过旧的数据
+                    local exist_info = parse_adjustment_value(exist_value)
+                    if info.updated_at <= exist_info.updated_at then
+                        goto continue
+                    end
+                end
+
+                import_count = import_count + 1
+                save_adjustment(code, phrase, info.to_position, info.updated_at, schema_id)
+            end
         end
 
         ::continue::
@@ -553,6 +752,77 @@ local function import_from_file(db, schema_id)
 
     _need_export[schema_id] = true  -- 导入后标记需要导出
     return true, import_count
+end
+
+--- 在备份文件头写「已作废」标记（/txqk 真清空用）。
+--- 为什么不删备份：用户要的是「想恢复就手动 /txdr」，所以内容留着，只插一行标记；
+---   自动导入见到 #/cleared 会整份跳过，/txdr 传 force=true 忽略标记即可恢复。
+--- 为什么不只靠 _cleared_schemas：那是纯 Lua 表，引擎重启即空，
+---   于是「清空」活不过一次重启 —— 下次首次读写调序时又会从 txt 全导回来。
+---@param schema_id string
+---@return boolean 标记是否写入成功（备份不存在时返回 false，此时也无需标记）
+local function mark_backup_cleared(schema_id)
+    local filename = get_export_file_name(schema_id)
+    if not filename then return false end
+
+    local file = io.open(filename, "rb")
+    if not file then return false end   -- 没有备份 ⇒ 重启后无内容可导，无需标记
+    local content = file:read("*a")
+    file:close()
+    if content:sub(1, 3) == "\xef\xbb\xbf" then content = content:sub(4) end
+
+    -- 去掉旧的 #/cleared 行，避免反复 /txqk 叠出一堆标记
+    local kept = {}
+    for line in content:gmatch("[^\r\n]+") do
+        if not line:match("^#/cleared") then kept[#kept + 1] = line end
+    end
+
+    local out = io.open(filename, "wb")
+    if not out then return false end
+    out:write("\xef\xbb\xbf")
+    out:write(string.format("#/cleared\t%d\n", os.time()))
+    for _, line in ipairs(kept) do
+        out:write(line .. "\n")
+    end
+    out:close()
+    return true
+end
+
+--- 撤掉备份文件头的「已作废」标记（/txdr 显式恢复成功后用）。
+--- 【为什么必须有这一步 —— 2026-11-27 真机实测发现的洞】
+---   /txqk 写 #/cleared ⇒ 之后 /txdr 恢复，标记却留在文件里。
+---   而 export_to_file 的保护判据把 #/cleared 当成「这份备份已作废」整段跳过：
+---   ⇒ 恢复之后本该「备份里的键必须都在库里」的护栏一直没生效。
+---   真机复现：恢复后手动往备份塞一条库里没有的记录，/txdr + /txdc 全程无提示，
+---   那条记录被新快照静默抹掉 —— 正是用户要求「备份要能合并恢复」时要防的事。
+---   语义上也讲不通：用户刚刚显式恢复它，它就不再是「作废的备份」。
+---@param schema_id string
+---@return boolean 是否真的删掉了标记
+local function unmark_backup_cleared(schema_id)
+    local filename = get_export_file_name(schema_id)
+    if not filename then return false end
+
+    local file = io.open(filename, "rb")
+    if not file then return false end
+    local content = file:read("*a")
+    file:close()
+    if content:sub(1, 3) == "\xef\xbb\xbf" then content = content:sub(4) end
+
+    local kept, found = {}, false
+    for line in content:gmatch("[^\r\n]+") do
+        if line:match("^#/cleared") then found = true
+        else kept[#kept + 1] = line end
+    end
+    if not found then return false end    -- 没有标记 ⇒ 不动文件，省一次写盘
+
+    local out = io.open(filename, "wb")
+    if not out then return false end
+    out:write("\xef\xbb\xbf")
+    for _, line in ipairs(kept) do
+        out:write(line .. "\n")
+    end
+    out:close()
+    return true
 end
 
 -- 懒导入：首次真正读写调序数据时，才打开 db 并从 txt 备份导入。
@@ -566,27 +836,45 @@ ensure_imported = function(schema_id, db)
 end
 
 --- 清空数据库
+--- ★ 2026-11-26 修复 /txqk 退格/空格上屏卡死：统一到 af_clear 的清库范式。
+---   旧实现是全方案唯一做这两件事的命令：
+---     ① 在 db:query(""):iter() 迭代过程中直接 db:erase(key)，迭代器与底层写入交叠；
+---     ② close_db() + 清空 _user_dbs 后重新 get_user_db()（过滤器里 close/reopen）。
+---   用户对照实验：先把调序数据清空，再打 /txqk 不再卡死 —— 此时 ② 照常执行却不卡，
+---   ⇒ 卡死必要条件是「有键要删」，而非 close/reopen 本身。
+---   改为与 /txzq 的 af_clear 完全一致：先收集键、退出迭代器后再 erase；不 close、不 reopen。
+---   _need_export / _cleared_schemas 是纯 Lua 状态，不依赖数据库重开。
 local function clear_database(schema_id)
-    local db, close_db = get_user_db(schema_id)
-    if not db or not db:loaded() then return end
-    
-    -- 遍历删除所有键
+    local db = get_user_db(schema_id)
+    if not db or not db:loaded() then return 0 end
+
+    local keys = {}
+    local records = 0        -- 只数「真正的调序记录」，见下方注释
     local accessor = db:query("")
     if accessor then
         for key, _ in accessor:iter() do
-            db:erase(key)
+            keys[#keys + 1] = key
+            -- ★ 2026-11-27：清空动作照旧擦掉全表（含 rime 自己的元数据键），
+            --   但回显的条数只数调序记录 —— 库内还躺着 /db_name、/type、
+            --   /rime_version、/user_id 这 4 条元数据，真机实测 3 条记录会被报成
+            --   「已清空（7 条）」，用户第一反应是「我没调过这么多」。
+            local first = key:sub(1, 1)
+            if first == "\002" then
+                if key:sub(1, #AF_PREFIX) == AF_PREFIX then records = records + 1 end
+            elseif first ~= "\001" and first ~= "/" then
+                records = records + 1
+            end
         end
         accessor = nil
     end
-    
-    close_db()
-    
-    -- 重新初始化数据库
-    _user_dbs[schema_id] = nil
-    get_user_db(schema_id)
-    
+    for _, key in ipairs(keys) do db:erase(key) end
+
     _need_export[schema_id] = false  -- 清除导出标记，防止退出时导出空数据覆盖备份
-    _cleared_schemas[schema_id] = true  -- 设置清空标记，阻止自动导入
+    _cleared_schemas[schema_id] = true  -- 本次会话阻止自动导入
+    -- ★ 2026-11-27：再落一份持久标记到备份文件头。_cleared_schemas 只在本次进程有效，
+    --   引擎重启后为空 ⇒ 旧实现会让「清空」在重启后自动复活。/txdr 仍可强制恢复。
+    mark_backup_cleared(schema_id)
+    return records
 end
 
 ---执行排序调整
@@ -611,12 +899,9 @@ local function process_adjustment(context, schema_id)
             --   每个候选原来在哪。这里改为遍历 get_adjustment 全量删除。
             --   注：get_adjustment 已跳过 \002 开头的自动调频记录，故自动调频不受影响
             --   （自动调频另有 /txzq 命令清空）。
-            local user_adjustment = get_adjustment(code, schema_id)
-            if user_adjustment then
-                for adjust_key in pairs(user_adjustment) do
-                    save_adjustment(code, adjust_key, nil, nil, schema_id)
-                end
-            end
+            -- ★ 2026-11-27：循环体抽成 clear_code_adjustment，供「按编码复位」的命令复用。
+            --   当前唯一的调用点就是这里（Ctrl+L）；命令形态仍在评估，未接入。
+            clear_code_adjustment(code, schema_id)
         end
     else -- 否则进入 filter 调整位移
         cur_adjustment_phrase = selected_cand.text
@@ -652,7 +937,7 @@ end
 local AUTO_FREQ_MIN = 2            -- 同一个「编码+词」**连续**上屏几次才提前（2 = 连续两次才置顶）
 local AUTO_FREQ_HOIST_MAX = 5      -- 单个编码一次最多提前几个词
 local AUTO_FREQ_MAX_PER_CODE = 40  -- 单个编码最多保留多少条记录（防膨胀）
-local AF_PREFIX = "\002af|"        -- 记录键前缀（\002 开头 ⇒ 与手动调序互不干扰）
+-- AF_PREFIX 已上移到文件前部（导出/导入要先用到它），此处不再重复声明。
 
 local _af_stat = { calls = 0, commits = 0, writes = 0,
                    last_code = nil, last_word = nil, err = nil }
@@ -742,7 +1027,10 @@ end
 ---   所以现在改成：只有连续 AUTO_FREQ_MIN 次上屏同一个「编码+词」才写库，
 ---   单次上屏一个字都不写（数据不变 ⇒ 顺序自然不变）。
 local function af_record(code, word, schema_id)
-    if not code or code == "" or not word then return false end
+    -- ★ 2026-11-27：补 schema_id 判空 —— 下方新增的 _need_export[schema_id] 在 nil 时
+    --   会抛 "table index is nil"（Lua 里给表写 nil 键是错误，不是无操作）。
+    --   原实现在 schema_id 为 nil 时靠 get_user_db 返回 nil 兜住，这里显式挡住更稳。
+    if not code or code == "" or not word or not schema_id then return false end
     local db = get_user_db(schema_id)
     if not db or not db:loaded() then _af_stat.err = "数据库未加载"; return false end
 
@@ -819,6 +1107,9 @@ local function af_record(code, word, schema_id)
         if ns <= _af_seq_hint then ns = _af_seq_hint + 1 end
         _af_seq_hint = ns
         local oku = pcall(function() db:update(key, "T" .. ns) end)
+        -- ★ 2026-11-27：自动调频现在也进备份，序号变了就要标记待导出。
+        --   否则这类写入不改变条目数，而旧导出保护判据看的是条目数 ⇒ 永远导不出去。
+        if oku then _need_export[schema_id] = true end
         pcall(af_probe, string.format("AFREC 已存在·抬到最前 rk=[%s] %s→%d (max=%d) ok=%s",
                                tostring(key), tostring(oldseq), ns, cur_max, tostring(oku)))
         _af_stat.err = nil
@@ -838,6 +1129,7 @@ local function af_record(code, word, schema_id)
     if seq <= _af_seq_hint then seq = _af_seq_hint + 1 end   -- 防止清库后序号回退
     _af_seq_hint = seq
     db:update(key, "T" .. seq)
+    _need_export[schema_id] = true   -- ★ 自动调频也进备份（见 export_to_file 的类型列说明）
     _af_stat.err = nil
     return true
 end
@@ -1163,10 +1455,26 @@ local function af_apply(list, code, schema_id)
     _af_stat.last_dump = table.concat(parts, " ")
     _af_stat.dump_n = #dump
 
+    -- ★ 2026-11-27 真机实测修复：「一次最多提前几个词」必须按**不同的词**计数。
+    -- 【症状】库内 3 条自动记录（废弃#3 / 词序#2 / 调序#1），实际只提前了 2 个，
+    --        第 3 个（调序）稳稳留在原位置 —— 用户看到的就是「自动调频调不动」。
+    -- 【根因】af_apply 跑在 S 过滤器里，此时候选流**还没有去重**（去重在后面的 F）。
+    --        同一个词在原始流里会出现多次（码表 / pinyin_direct / 反查各一份），
+    --        真机探针实测本编码的前排是：
+    --            [废弃#3(原第1) 废弃#3(原第19) 废弃#3(原第20) 词序#2(原第32) 词序#2(原第7)]
+    --        —— 5 个槽位被「废弃×3 + 词序×2」占满，调序一个槽都没拿到。
+    --        而下面的 rest 是**按 text** 排除重复项的 ⇒ 被挤掉的不只是重复项本身，
+    --        而是这个词彻底失去了被提前的资格。
+    -- 【修法】先按 text 去重再排序截断：每个词只保留**最先出现**的那一条
+    --        （后面那些同名重复项本来就会被 rest 排除，留哪一条对最终顺序没有任何影响）。
     local picked = {}
+    local picked_seen = {}
     for i, c in ipairs(list) do
         local s = scores[c.text]
-        if s then picked[#picked + 1] = { idx = i, score = s, cand = c } end
+        if s and not picked_seen[c.text] then
+            picked_seen[c.text] = true
+            picked[#picked + 1] = { idx = i, score = s, cand = c }
+        end
     end
     if #picked == 0 then return end
 
@@ -1301,23 +1609,18 @@ function P.func(key_event, env)
             end
         end
 
-        -- 数字键 1：撤销上次调序（移动端下滑数字）
-        if keycode == 0x31 then
-            pin_candidate_index = 1  -- 1 表示撤销
-            context:refresh_non_confirmed_composition()
-            return RIME_PROCESS_RESULTS.kAccepted
-        end
-
-        -- 数字键 2-9：有候选菜单时前移对应候选
-        if keycode >= 0x32 and keycode <= 0x39 then
-            pin_candidate_index = keycode - 0x30  -- 1-indexed
-            context:refresh_non_confirmed_composition()
-            return RIME_PROCESS_RESULTS.kAccepted
-        end
-
-        -- 数字键 0：前移第10候选
+        -- 数字键 0：撤销上次调序（移动端下滑数字）
+        -- ★ 由 1 改为 0：后移模型里 1 号位是最常用的键（后移第1候选），撤销让位。
+        --   前移模型下 0 表示「前移第10候选」；改后移后「第10位再后移」无意义，正好腾出。
         if keycode == 0x30 then
-            pin_candidate_index = 10
+            pin_candidate_index = 0  -- 0 表示撤销
+            context:refresh_non_confirmed_composition()
+            return RIME_PROCESS_RESULTS.kAccepted
+        end
+
+        -- 数字键 1-9：有候选菜单时后移对应候选
+        if keycode >= 0x31 and keycode <= 0x39 then
+            pin_candidate_index = keycode - 0x30  -- 1-indexed
             context:refresh_non_confirmed_composition()
             return RIME_PROCESS_RESULTS.kAccepted
         end
@@ -1411,17 +1714,32 @@ function F.func(input, env)
     current_schema_id = schema_id
     
     -- 处理清空数据库指令（生成空候选）
+    -- ★ 2026-11-27：改为「真清空」。原来只清 db，靠纯 Lua 的 _cleared_schemas 拦导入，
+    --   引擎一重启该表就空 ⇒ 下次首次读写调序时 txt 里的记录全被导回来。
+    --   现在 clear_database 会同时给备份文件写 #/cleared 标记（落盘），
+    --   自动导入见到标记整份跳过；要恢复必须显式 /txdr。
     if env.engine.context.input == "/txqk" then
-        clear_database(schema_id)
-        yield(Candidate("clear_db", 0, #context.input, "※ 当前方案调序数据库已清空（备份保留）", ""))
+        local n = clear_database(schema_id)
+        yield(Candidate("clear_db", 0, #context.input,
+                        string.format("※ 调序已清空（%d 条，含自动调频）；备份已作废，恢复用 /txdr", n), ""))
         return
     end
 
     -- 【自动调频】/txzq 调序自动清：只清空自动调频记录（手动调序不受影响）
     if env.engine.context.input == "/txzq" then
         local n = af_clear(schema_id)
+        -- ★ 2026-11-27：自动调频现在也进备份，清完必须同步备份文件，
+        --   否则重启时又会把 txt 里的 A 行导回来（清自动同样活不过重启）。
+        --   只在确实清掉了记录时才强制导出：n=0 说明库和备份本就没有自动记录，
+        --   此时强行导出可能把 /txqk 留下的作废备份覆盖成只剩一个空文件。
+        if n > 0 then
+            local db = get_user_db(schema_id)
+            if db and db:loaded() then
+                export_to_file(db, schema_id, true)
+            end
+        end
         yield(Candidate("clear_af", 0, #context.input,
-                        string.format("※ 自动调频记录已清空（%d 条，手动调序保留）", n), ""))
+                        string.format("※ 自动调频记录已清空（%d 条，手动调序保留，备份已同步）", n), ""))
         return
     end
 
@@ -1456,33 +1774,41 @@ function F.func(input, env)
             return
         end
         
-        -- 1. 统计数据库有效条目数
+        -- 1. 统计数据库有效条目数（手动 / 自动分开统计，提示里分开显示）
+        -- ★ 2026-11-27：口径必须与 export_to_file 完全一致（手动全部 + 自动中只算 AF_PREFIX 的），
+        --   否则预判断放行、export 内部再按另一口径统计，两边对不上会给出误导性提示。
         local accessor = db:query("")
-        local db_entries = 0
+        local manual_entries = 0
+        local auto_entries = 0
         if accessor then
             for key, _ in accessor:iter() do
-                if key:sub(1, 1) ~= "\001" then
-                    db_entries = db_entries + 1
+                local first = key:sub(1, 1)
+                if first == "\002" then
+                    if key:sub(1, #AF_PREFIX) == AF_PREFIX then
+                        auto_entries = auto_entries + 1
+                    end
+                elseif first ~= "\001" then
+                    manual_entries = manual_entries + 1
                 end
             end
             accessor = nil
         end
-        
-        -- 2. 统计备份文件条目数
-        local txt_entries = count_txt_entries(schema_id)
-        
-        -- 3. 预先判断保护条件，直接提示（避免依赖 export_to_file 返回值）
-        if txt_entries > 0 and db_entries <= txt_entries then
-            yield(Candidate("export_db", 0, #context.input, "※ 导出失败：已有有效备份，请先执行 /txdr 恢复", ""))
-            return
-        end
-        
-        -- 4. 执行实际导出（此时允许覆盖）
-        local count = export_to_file(db, schema_id)
-        if count == nil then
+
+        -- 2. 执行实际导出
+        -- ★ 2026-11-27：判据统一收进 export_to_file，这里不再重复预判断。
+        --   预判断与内部判据必须完全一致，写两份迟早会漂移；现在由返回值带出「缺失条数」，
+        --   提示反而更准（能说清缺了几条，而不是笼统一句「数据库为空」）。
+        local count, missing = export_to_file(db, schema_id)
+        if missing then
+            yield(Candidate("export_db", 0, #context.input,
+                            string.format("※ 导出失败：备份中还有 %d 条库中没有的记录，请先 /txdr 导入再导出", missing), ""))
+        elseif count == nil then
             yield(Candidate("export_db", 0, #context.input, "※ 导出失败：未知错误", ""))
         elseif count > 0 then
-            yield(Candidate("export_db", 0, #context.input, "※ 成功导出 " .. count .. " 条数据", ""))
+            -- 分开显示：自动调频条目通常远多于手动，混成一个数会让人误以为手动调了很多
+            yield(Candidate("export_db", 0, #context.input,
+                            string.format("※ 成功导出 %d 条（手动 %d、自动 %d）",
+                                          count, manual_entries, auto_entries), ""))
         else
             yield(Candidate("export_db", 0, #context.input, "※ 导出失败：当前数据库无调序数据", ""))
         end
@@ -1495,8 +1821,16 @@ function F.func(input, env)
         -- 手动导入时临时清除清空标记，允许导入
         local was_cleared = _cleared_schemas[schema_id]
         _cleared_schemas[schema_id] = nil
-        
-        local success, count = import_from_file(db, schema_id)
+
+        -- ★ 2026-11-27：force=true ⇒ 忽略备份头部的 #/cleared 标记。
+        --   /txqk 把备份标成「作废」只针对「自动导入」，用户显式 /txdr 就是要恢复它。
+        local success, count = import_from_file(db, schema_id, true)
+        if success then
+            -- ★ 2026-11-27：恢复成功就把备份头上的 #/cleared 撤掉 —— 它刚被用户
+            --   显式恢复，不再是「作废的备份」；留着会让导出保护的判据整段跳过
+            --   （详见 unmark_backup_cleared 注释里的真机复现）。
+            unmark_backup_cleared(schema_id)
+        end
         if success and count and count > 0 then
             yield(Candidate("import_db", 0, #context.input, "※ 成功导入 " .. count .. " 条数据", ""))
         elseif success and count == 0 then
@@ -1521,12 +1855,29 @@ function F.func(input, env)
         
         local all_phrases = {}
         local seen = {}
-        
+        -- ★ 2026-11-27：自动调频记录**不进明细**，但要**报条数**。
+        -- 【为什么必须报】只报手动时，本页会显示「共 1 条记录（含备份）」，
+        --   而 /txdc 同时显示「成功导出 3 条（手动 1、自动 2）」—— 同一时刻两个
+        --   数字对不上，用户第一反应就是「统计坏了 / 备份漏了」。
+        --   两个数其实都对：统计按设计只覆盖手动（自动是统计结果，不是用户的手动决定，
+        --   混进明细会让同一个词出现两遍、「〔备份〕」标记也失去意义）。
+        --   ⇒ 明细仍只列手动，但标题把两边的条数摆在一起，与 /txdc 的措辞对齐。
+        local auto_seen = {}
+        local auto_count = 0
+        local af_head = #AF_PREFIX   -- "\002af|" 的长度：库内键 = AF_PREFIX .. 码 .. "|" .. 词
+
         local accessor = db:query("")
         if accessor then
             for key, _ in accessor:iter() do
-                -- "\001" 是内部标记，"\002" 是自动调频记录，都不属于手动调序统计
-                if key:sub(1, 1) ~= "\001" and key:sub(1, 1) ~= "\002" then
+                local h = key:sub(1, 1)
+                -- "\001" 是内部标记（两边都不算），"\002" 是自动调频（只计数）
+                if h == "\002" then
+                    local k2 = key:sub(af_head + 1)
+                    if not auto_seen[k2] then
+                        auto_seen[k2] = true
+                        auto_count = auto_count + 1
+                    end
+                elseif h ~= "\001" then
                     local phrase = key:match("^.-|(.+)$")
                     if phrase and not seen[phrase] then
                         seen[phrase] = true
@@ -1547,8 +1898,25 @@ function F.func(input, env)
                     content = content:sub(4)
                 end
                 for line in content:gmatch("[^\r\n]+") do
-                    if line:sub(1, 1) ~= "#" then
-                        local key = string.match(line, "^(.-)\t")
+                    -- ★ 2026-11-27：备份格式 v2 第一列是类型字母（M 手动 / A 自动）。
+                    --   统计仍只覆盖手动调序 —— 自动调频是统计结果、不是用户的手动决定，
+                    --   混进来会让同一个词在列表里出现两遍，且「〔备份〕」标记失去意义。
+                    --   旧备份（v1）没有类型列，整行按手动处理。
+                    local body, is_auto = line, false
+                    if line:sub(1, 2) == BACKUP_KIND_MANUAL .. "\t" then
+                        body = line:sub(3)
+                    elseif line:sub(1, 2) == BACKUP_KIND_AUTO .. "\t" then
+                        is_auto = true
+                        body = line:sub(3)     -- ★ 2026-11-27：A 行也要剥掉类型列才能取到「码|词」
+                    end
+                    if is_auto then
+                        local key = string.match(body, "^(.-)\t")
+                        if key and not auto_seen[key] then
+                            auto_seen[key] = true
+                            auto_count = auto_count + 1
+                        end
+                    elseif body:sub(1, 1) ~= "#" then
+                        local key = string.match(body, "^(.-)\t")
                         if key then
                             local phrase = key:match("^.-|(.+)$")
                             if phrase and not seen[phrase] then
@@ -1562,7 +1930,7 @@ function F.func(input, env)
         end
         
         local count = #all_phrases
-        if count == 0 then
+        if count == 0 and auto_count == 0 then
             yield(Candidate("query_db", 0, #context.input, "※ 调序统计：当前无调序数据", ""))
         else
             local lines = {}
@@ -1570,7 +1938,14 @@ function F.func(input, env)
                 local tag = item.source == "file" and "〔备份〕" or ""
                 table.insert(lines, string.format("%d. %s %s", i, item.phrase, tag))
             end
-            local header = "=== 调序统计 ===\n共 " .. count .. " 条记录（含备份）\n------------------------\n"
+            -- ★ 2026-11-27：标题与 /txdc 的「（手动 N、自动 M）」对齐，
+            --   明细仍只列手动 —— 自动只报条数（理由见上面 auto_count 的注释）。
+            local head = "手动 " .. count .. " 条（含备份）"
+            if auto_count > 0 then
+                -- 单独一行，避免「（含备份）（不计明细）」括号叠括号
+                head = head .. "\n自动 " .. auto_count .. " 条（只报条数，不入明细）"
+            end
+            local header = "=== 调序统计 ===\n" .. head .. "\n------------------------\n"
             local content = header .. table.concat(lines, "\n")
             -- ★ 2026-11-06：多行内容候选栏只显首行标题，上屏还原全文
             --   （与 /jt /jq /gz /nl 同一机制，见 core.register_short_full 注释）。
@@ -1603,7 +1978,8 @@ function F.func(input, env)
     end
 
     -- 处理数字键调序操作（移动端下滑数字）
-    -- pin_candidate_index = 1: 撤销, 2-10: 前移对应候选
+    -- pin_candidate_index = 0: 撤销, 1-9: 后移对应候选
+    -- ⚠ 0 在 Lua 里是真值，`if pin_candidate_index then` 对 0 成立，不要改成 `> 0`
     if pin_candidate_index then
         local pin_idx = pin_candidate_index
         pin_candidate_index = nil
@@ -1665,30 +2041,83 @@ function F.func(input, env)
         end
 
         -- 执行数字键移动
-        if pin_idx == 1 then
-            -- 撤销：恢复上次调序的候选到原位置
+        if pin_idx == 0 then
+            -- 撤销：把候选送回「本轮调序开始前」的位置，并把这次调序留下的记录**真删掉**。
+            -- ★ 2026-11-27 改判：旧实现是「写一条目标位置记录」把词挪回去 —— 位置看着回去了，
+            --   但库里留下一条「词→N」的手动记录，作用是把这个词永久钉在第 N 位：
+            --   S 过滤器的自动调频永远被 F 的手动记录覆盖，等于撤销顺手冻住了这个词
+            --   （用户实测：手动调过的 役畜 之后再连续上屏 4 次，纹丝不动）。
+            --   用户的诉求是「撤销 = 当作没调过」，所以这里删记录，让自动调频重新接管。
+            -- ★ 起点用 origin_position（本轮第一次按键前的位置），不是最后一次按键前的位置：
+            --   连按 1、2、3 是一轮操作，按 0 应该一步回到原点，而不是只退一格。
             if last_adjustment and last_adjustment.code == code then
+                local la = last_adjustment
+                last_adjustment = nil
+
+                local target = math.min(la.origin_position or la.from_position or 1, #candidates)
+                if target < 1 then target = 1 end
                 for i, cand in ipairs(candidates) do
-                    if cand.text == last_adjustment.text then
+                    if cand.text == la.text then
                         local moved = table.remove(candidates, i)
-                        local target = math.min(last_adjustment.from_position, #candidates + 1)
-                        table.insert(candidates, target, moved)
-                        -- 保存新位置（实际上恢复）
-                        local key = is_func_mode and tostring(target - 1) or moved.text
-                        save_adjustment(code, key, target, nil, schema_id)
+                        table.insert(candidates, math.min(target, #candidates + 1), moved)
                         break
                     end
                 end
-                last_adjustment = nil
+
+                if is_func_mode then
+                    -- 功能模式下记录键是「位置-1」而非词，无法按词删除，保持旧语义：
+                    -- 把记录改成恢复后的目标位置即可（该模式本就以位置为键）。
+                    local key = tostring(target - 1)
+                    save_adjustment(code, key, target, nil, schema_id)
+                else
+                    -- 还原到「本轮第一下按键之前」的记录：有旧记录就写回旧值，
+                    -- 没有就删掉。★ 必须用 last_adjustment 里存下的快照，
+                    --   不能用这里重新 get_adjustment 读到的值 —— 那时库里已经是
+                    --   本轮前几下按键写进去的新记录了（实测：连按 5、6 后按 0，
+                    --   读到的 prev 是 6，于是「撤销」把自己刚写的那条又写回去）。
+                    if la.prev_to then
+                        save_adjustment(code, la.text, la.prev_to, la.prev_at, schema_id)
+                    else
+                        save_adjustment(code, la.text, nil, nil, schema_id)
+                    end
+                    -- ★ 删完必须同步备份（force 覆盖）：否则备份里仍有这个键，
+                    --   下次 /txdc 会被自己的保护判据拦下并提示「先 /txdr 导入」，
+                    --   而 /txdr 又会把它原样导回来 —— 撤销白做，还锁进死循环。
+                    local db = get_user_db(schema_id)
+                    if db and db:loaded() then
+                        export_to_file(db, schema_id, true)
+                    end
+                end
             end
-        elseif pin_idx >= 2 and pin_idx <= #candidates then
-            -- 前移一位：基于当前列表位置
+        elseif pin_idx >= 1 and pin_idx < #candidates then
+            -- 后移一位：基于当前列表位置（★ 2026-11-27 由前移改为后移）
+            --   数字键落到的就是「候选自己所在的那一格」，所以连按 1、2、3、4
+            --   动的始终是同一个词，save_adjustment 写的是同一个键，覆盖后只剩 1 条。
+            --   pin_idx == #candidates 时已是末位，再后移无处可去 ⇒ 不进入本分支，静默不动。
             local moved = table.remove(candidates, pin_idx)
-            local new_pos = pin_idx - 1
+            local new_pos = pin_idx + 1
             table.insert(candidates, new_pos, moved)
             local key = is_func_mode and tostring(new_pos - 1) or moved.text
+            -- ★ 起点只认本轮第一次：连按 1、2、3 时 last_adjustment 已经在，保留原 origin_position，
+            --   否则每按一次都会把起点往后推一格，撤销就只能退一格（旧行为）。
+            -- ★ prev_to / prev_at 也必须取「本轮第一次按键之前」的库值：
+            --   同一轮里再次读取读到的已是自己刚写的新记录，撤销会把刚写的写回去。
+            local same_round = last_adjustment and last_adjustment.code == code
+                and last_adjustment.text == moved.text
+            if same_round then
+                last_adjustment.from_position = last_adjustment.origin_position
+            else
+                local prev = user_adjustment and user_adjustment[moved.text]
+                last_adjustment = {
+                    code = code,
+                    text = moved.text,
+                    origin_position = pin_idx,
+                    from_position = pin_idx,
+                    prev_to = prev and prev.to_position or nil,
+                    prev_at = prev and prev.updated_at or nil,
+                }
+            end
             save_adjustment(code, key, new_pos, nil, schema_id)
-            last_adjustment = { code = code, text = moved.text, from_position = pin_idx }
         end
 
         -- 更新会话内顺序缓存（用于快速恢复，但本分支已从数据库读取，缓存仅作辅助）

@@ -1,7 +1,7 @@
 # TouchWB / 流萤 · 项目基线（BASELINE）
 
 > **基线版本**：v2.19（README 口径 2026-11-04）
-> **当前版本**：v2.27 / 2026-11-26（S149；README 头部、`dev/docs/更新日志.md`、本文件第七节三处同步）
+> **当前版本**：v2.28 / 2026-11-27（S150；README 头部、`dev/docs/更新日志.md`、本文件第七节三处同步）
 > **基线日期**：2026-11-04（重定义基线，作为「模块化重构 + 类型定义库 + 纯内存状态表」新项目的起点）
 > **基线范围**：`D:\AutophotiaIME\dev\space\schemas\TouchWB` 方案本体，82 个文件（不含 build 编译产物，2026-11-04 实测）
 > **用途**：后续所有功能拓展、优化、Bug 修复均以此文件为对照基准；每次变更在此追加「变更记录」，保证任何时候都能回答"当前版本和基线差了什么"。
@@ -60,7 +60,7 @@ D:\AutophotiaIME\
 │   ├── tools/             工具脚本（pack-release.sh / 验证脚本，4 个 .sh/.py，已入 git）
 │   ├── legacy-remote-b2faab1-backup.zip   旧远端备份（兜底）
 │   └── App场景感知可行性调研.md / 简码越级检查报告.md / 联想增强方案.md
-├── patches/             早期补丁归档（补丁 zip + 独立补丁 + _backup + 字体包，不进 git）
+├── patches/             早期补丁归档（补丁集 zip + _backup + 字体包，不进 git；独立补丁 2026-11-27 移除）
 ├── releases/            打包输出（TouchWB_S<序号>_<日期>.zip）
 ├── wps/                 无关脚本
 ├── 码表处理/             码表工具（WubiLex/mbEditer/字频表）
@@ -254,6 +254,7 @@ ly_wubi_pinyin（26键混输，509行） ──┴── ly_wubi_pinyin_14（14�
 | 2026-11-18 | **手写键盘布局化 + 横屏手写 + 下滑数字开关 + 主题字段统一（v2.26，S148）**：① 新增 `swipe_num_action` 下滑数字开关——`super_sequence.lua` 数字键在 `get_option("swipe_num_action")==true` 时 `return kNoop` 放行 selector 原生上屏（同 PC 数字选字），4 份 schema 各加 switch（`reset:0` 默认调序）。② 手写改主题内 `handwriting` 布局（弃 public `__include`、内联三行行宽和=100，`select:handwriting` 切入/`select:default` 智能返回，加 `lock:true`），14/26 键主键盘中英键上滑进手写。③ 横屏手写 `handwriting_land`（字面 `select:handwriting_land`、底栏键全 `_land` 版 select），中英/中写来回切正常；英写进手写即回中文为手写固有行为（`ascii_mode:0`+`send:Eisu_toggle`）。④ 主题字段统一：删 4 布局字号死字段（24 行）、删 `height_land` 死字段、9 布局 `height`=46、preview 统一、补 4 个 `_sm_md` 小屏布局。版本口径同步 README 头部/更新日志/本文件，`info.yaml` `version` 固定 `"2.0"`、仅 `update_time`→2026-11-18 | 4 份 schema、`super_sequence.lua`、14/26 键 theme.yaml、README/更新日志/BASELINE | `swipe_num_action` 沙盒 8/8 PASS（待真机）；横屏手写、中英/中写来回切真机通过；字段清理源码实证；S148 打包 67 文件校验 |
 | 2026-11-15 | **键盘标点与长按统一化 + 输入统计口径优化（v2.24，S146）**：① **主题层**：14/26 键标点布局对齐中文主 `default`；英文布局清上滑全角、14 键英文套用 26 键标点并补 6 条半角定义；长按动作重写为仅含当前键实际输出字符、删约 145 条无引用定义，长按字母与 `= / @ /` 改 `commit_*` 直上屏（裸字符会被 `speller.alphabet` 当输入码）；数字键盘退格下滑由重做改撤销；成对标点全角上滑 `text: "（）{Left}"` 顶字上屏、半角下滑 `text: "{function_rime_clear}X"` 清候选直接上屏。② **引导符口径（用户 11-15 定）**：`= @ # / * % ~` 走 `send_*` 按键通道——有候选时由 `lua/pair_punct.lua` 的 `pool_punct_set` 顶「首候选 + 符号」，无候选时放行 punctuator 弹候选菜单并触发引导；为此从 `direct_punct_map` 移除 `* % ~`（与 `#` 同待遇）。「写法相同、行为不同」的分界是**通道**（`send:`/裸字符过 Lua，`text:`/`commit:` 前端直插不过），不是动作名或全半角；动作名不可与 `preset_keys` 同名（本地同名覆盖真机不生效）。③ **统计口径**：删除 `update_fastest`（≥3 秒段折算取 max，真机出现 144 字/分），改为 **60 秒滑动窗口内带编码上屏汉字数的全天最大值**，四份报告 `极速[%.1f]字/分` → `最快一分钟[%.0f]字`；新增 `speed_ver` 按文件自带版本迁移（只归零 `fastest`、其余数据保留）；均速的 `avgGaps/avgCnts`、`gapThd=10`、≥3 秒门槛一律不动。补 `Submit_text.lua` 空格快捷上屏的 `input_text ~= ""` 判据，使空格/分号/引号三条路径一致排除 predictor 空段联想候选。④ **报告语义**：周报改「今日单次上屏最多」（`daily_max`）、月报去「一次」（`weekly_max` 是周总字数）、年报改「最常单次上屏 N 字」（众数可能是单字）。⑤ 版本口径同步 README 头部 / 更新日志 / 本文件三处；`info.yaml` 的 `version` 仍固定 `"2.0"`、仅 `update_time` → 2026-11-15；新增 `dev/docs/输入统计口径核查_2026-11-15.md` 归档真机数据实证 | 14/26 键 theme.yaml、`lua/pair_punct.lua`、`lua/input_statistics.lua`、`lua/Submit_text.lua`、README/更新日志/BASELINE | **真机：所有上滑/下滑均达标**（全角顶字、半角清候选直上屏）；统计侧真机 80 段数据定位 144 = 第 9 段 `(5s,12字)`，窗口衰减实证 20 秒起平台期 90.7 字/分 ⇒ 60 秒无额外稀释；lupa(Lua 5.4) compile + YAML 解析通过，mock 引擎验证旧文件迁移与「最快一分钟[12]字」；行尾统一 LF、`git diff --check` 干净；**S146 按同版补丁惯例覆盖重打包（67 文件）**；本次 git 提交并推送 |
 | 2026-11-26 | **输入统计排除命令全文上屏（v2.27，S149）**：① 真机周统计「最快一分钟 192 字 / 均速 79 字」与 `lengths` 单次 59、19 字长尾，根因是 `hook_expand` 前置回调先把短标题换成全文、统计回调后连拿到全文，旧 `^[※◉]` 文本过滤挡不住 `/jq /gz /nl /jt` 等以 `===` 开头的命令正文，命令输入码非空被当成带编码上屏。② 修复：`report_commit_text(commit_text, commit_code)` 按输入码 `/` 前缀一次排除全部命令；四处调用点传上屏瞬间输入码（`commit_notifier` 传 `input_at_commit`、`Submit_text.lua` 三处桥接传按键前 `input_text`）；删除 `is_summary_command` 与 `^[※◉]` 两条冗余文本兜底（枚举确认 `※/◉` 文本来源全为 `/` 命令）。③ 验证：真实 Lua 运行时 14/14 PASS、语法 28 文件（仅 `lib/basic.lua` 原有 BOM 告警）、补丁包 Lua 不一致 0；真机确认 `/` 命令上屏不再计入。④ 边界：历史 192/59 需 `/qk` 清空，`Submit_text.lua` 不入补丁包 | `input_statistics.lua`、`Submit_text.lua`、`core.lua`、README / 更新日志 / BASELINE、补丁 zip 与说明 | 沙箱 14/14；补丁一致性校验；真机确认通过；S149 打包 67 文件；git 提交并推送 |
+| 2026-11-27 | **调序收尾：后移链 + 撤销真删 + 备份可合并恢复（v2.28，S150）**：① 移动端手动调序由「前移」改为「后移」（数字键 N = 第 N 位候选下沉一位，0 = 撤销）——前移模型下第 1 位是边界、压不下去，只能去推后面的词，四次按键写四条别人的位置记录把前四位钉死；后移模型连按 1/2/3/4 落到的始终是同一个词，同键覆盖只剩 1 条。② 撤销改为**真删记录**：旧实现写一条目标位置把词挪回去，记录残留 = 把该词永久钉住（S 的自动提前被 F 的手动记录覆盖），真机实测手动挪过的词连打 4 次纹丝不动；现为「连按算一轮、按 0 回本轮起点 + 删记录（有旧记录则还原）+ force 同步备份」。③ 备份格式 v2：`M`/`A` 类型列，手动 + 自动一起存（整个调序是整体），`\002` 控制字符不入 txt，v1 兼容。④ 导出保护改「键集合包含」判据（旧判据比条目数，自动调频只改位置不增条目 ⇒ 永远导不出去）；`/txqk` 写 `#/cleared`、`/txdr` 成功后撤销该标记。⑤ 真 bug：`af_apply` 在 S 过滤器里跑时候选流未去重，5 个「提前名额」被同一个词的 2~3 份副本吃满，第三个词拿不到名额 ⇒ 改为按词去重后再截断。⑥ 口径对齐：`/txtj` 标题拆手动/自动、`/txqk` 只数调序记录、`/txdr` 修嵌套导入计数偏小。 | `super_sequence.lua`、`schemas/TouchWB/README.md`、`info.yaml`（update_time）、更新日志 / BASELINE | 真机（小狼毫 0.17.4 `rime.dll` + ctypes，独立用户目录、强制移动端模式）：后移链 / 撤销归零且无导出死锁 / 撤销后自动接管 / `/txqk`→`/txdr`→导出保护拦截 / 模拟重装兜底，全部通过；S150 打包 67 文件 |
 ---
 
 ## 八、Git 仓库管理（2026-10-21 重构；2026-10-24 根上移至 `dev/`）
@@ -273,7 +274,7 @@ D:\AutophotiaIME\
 │   ├── legacy-remote-b2faab1-backup.zip  ← 旧版远端文件备份（已排除 *.zip，不进 git）
 │   └── 计划文档（App场景感知调研.md / 简码越级检查报告.md / 联想增强方案.md，已入 git）
 ├── releases\                   ← 打包输出目录，包名 TouchWB_S<序号>_<日期>.zip
-├── patches\                    ← 早期补丁归档（补丁 zip/独立补丁/_backup/字体包，不进 git）
+├── patches\                    ← 早期补丁归档（补丁集 zip/_backup/字体包，不进 git；独立补丁已移除）
 └── wps\ 码表处理\ xiangqi\     ← 其它用途目录，不参与 git，不用管
 ```
 
